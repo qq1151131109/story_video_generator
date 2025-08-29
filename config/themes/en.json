@@ -1,0 +1,68 @@
+{
+  "theme_categories": {
+    "Ancient Warfare": [
+      "The Battle of Red Cliffs in Three Kingdoms",
+      "Qin Shi Huang Unifies China", 
+      "Xiang Yu's Last Stand at Wujiang",
+      "Emperor Wu's Campaign Against Xiongnu",
+      "Yue Fei's Fight Against Jin Dynasty",
+      "Genghis Khan's Western Conquest",
+      "Battle of Fei River - Former Qin Defeat",
+      "Battle of Changping - Bai Qi's Massacre",
+      "Battle of Guandu - Cao Cao's Victory",
+      "Battle of Yiling - Liu Bei's Great Defeat"
+    ],
+    "Imperial Secrets": [
+      "Wu Zetian Becomes Empress",
+      "Yang Guifei and An Lushan Rebellion",
+      "Empress Dowager Cixi's Regency", 
+      "Emperor Kangxi Suppresses Three Feudatories",
+      "The Mystery of Yongzheng's Succession",
+      "Emperor Qianlong's Southern Tours",
+      "Emperor Yongle Usurps Nephew's Throne",
+      "Song Taizu Dismisses Generals with Wine",
+      "Emperor Wu's Witchcraft Disaster",
+      "Emperor Xuanzong's Mawei Slope Incident"
+    ],
+    "Folk Legends": [
+      "Judge Bao's Court Cases",
+      "Living Buddha Ji Gong's Legends",
+      "The Legend of White Snake", 
+      "The Butterfly Lovers Story",
+      "Meng Jiangnu Weeps at Great Wall",
+      "The Cowherd and Weaver Girl",
+      "Chang'e Flying to the Moon",
+      "Hou Yi Shooting Nine Suns", 
+      "Jingwei Filling the Sea",
+      "Kuafu Chasing the Sun"
+    ],
+    "Heroic Tales": [
+      "Guan Yu Passes Five Barriers",
+      "Zhao Yun Rescues Liu Shan at Changban",
+      "Mulan Joins Army for Father",
+      "Yue Fei's Mother Tattoos Loyalty",
+      "Wen Tianxiang's Song of Righteousness", 
+      "Shi Kefa Defends Yangzhou",
+      "Huo Qubing Seals Wolf Juxu",
+      "Wei Qing the Flying General of Dragon City",
+      "Qi Jiguang Anti-Japanese Hero",
+      "Zheng Chenggong Recaptures Taiwan"
+    ],
+    "Strategic Legends": [
+      "Zhuge Liang Borrows Arrows with Straw Boats",
+      "Sima Yi Feigns Illness to Deceive Cao Shuang",
+      "Tian Ji's Horse Racing - Sun Bin's Strategy",
+      "Han Xin's Last Stand Battle",
+      "Zhang Liang Receives Book Under Bridge",
+      "Chen Ping's Counter-Intelligence Plot",
+      "Jia Xu's Clever Plan to Save Dong Zhuo",
+      "Xun Yu's Ministerial Talent",
+      "Guo Jia's Divine Calculations", 
+      "Pang Tong Phoenix Chick's Strategies"
+    ]
+  },
+  "batch_config": {
+    "themes_per_batch": 5,
+    "concurrent_processing": 3
+  }
+}

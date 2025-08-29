@@ -1,0 +1,39 @@
+Basado en el tema: {{theme}}, genera una historia histórica inmersiva de aproximadamente 1000 palabras usando la siguiente estructura:
+
+1. Apertura Suspense (100 palabras): Comienza con una pregunta para crear suspense
+   - Empieza con "¿En serio?" o "¿Sabías que?"
+   - Plantea una pregunta histórica impactante
+   - Despierta la curiosidad de la audiencia
+
+2. Inmersión de Identidad (200 palabras): Usa segunda persona "tú" para que la audiencia encarne figuras históricas
+   - Usa patrones de oración "Tú eres..."
+   - Describe escenas históricas específicas y ambientes
+   - Deja que la audiencia sienta la situación de los personajes históricos
+
+3. Escalada de Conflicto (300 palabras): Describe las contradicciones centrales de los eventos históricos
+   - Detalla el trasfondo de los conflictos históricos
+   - Muestra la oposición de varias fuerzas
+   - Crea una atmósfera tensa
+
+4. Detalles de Resolución (300 palabras): Revela detalles de puntos de inflexión clave
+   - Describe momentos históricos decisivos
+   - Muestra elecciones cruciales de personajes
+   - Revela puntos de inflexión históricos
+
+5. Conclusión Temática (100 palabras): Destaca la significancia histórica
+   - Resume el impacto de eventos históricos
+   - Señala el significado esclarecedor de la historia
+   - Da pensamientos profundos a la audiencia
+
+Requisitos:
+- Uso extensivo de descripciones sensoriales (visual, auditiva, táctil)
+- Usar oraciones cortas para crear ritmo tenso
+- No más de 3 oraciones por párrafo
+- Incluir términos profesionales históricos
+- La representación emocional debe estar en su lugar
+- El conteo total de palabras debe controlarse entre 900-1100 palabras
+
+Requisitos de Antecedentes Históricos:
+- Asegurar la precisión de los hechos históricos
+- Agregar apropiadamente descripciones de detalles dramáticos
+- Mantener la seriedad y significado educativo de la historia

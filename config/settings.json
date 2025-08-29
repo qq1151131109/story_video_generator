@@ -1,0 +1,116 @@
+{
+  "general": {
+    "output_dir": "output",
+    "temp_dir": "output/temp",
+    "log_level": "INFO",
+    "max_concurrent_tasks": 6,
+    "supported_languages": [
+      "zh",
+      "en",
+      "es"
+    ],
+    "default_language": "zh"
+  },
+  "llm": {
+    "script_generation": {
+      "model": "google/gemini-2.0-flash-001",
+      "temperature": 0.8,
+      "max_tokens": 1024,
+      "api_base": "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}",
+      "api_key": "${OPENROUTER_API_KEY}"
+    },
+    "theme_extraction": {
+      "model": "google/gemini-2.0-flash-001",
+      "temperature": 1.0,
+      "max_tokens": 512,
+      "api_base": "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}",
+      "api_key": "${OPENROUTER_API_KEY}"
+    },
+    "scene_splitting": {
+      "model": "google/gemini-2.0-flash-001",
+      "temperature": 0.8,
+      "max_tokens": 8192,
+      "api_base": "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}",
+      "api_key": "${OPENROUTER_API_KEY}"
+    },
+    "image_prompts": {
+      "model": "google/gemini-2.0-flash-001",
+      "temperature": 1.0,
+      "max_tokens": 16384,
+      "api_base": "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}",
+      "api_key": "${OPENROUTER_API_KEY}"
+    },
+    "character_analysis": {
+      "model": "google/gemini-2.0-flash-001",
+      "temperature": 0.8,
+      "max_tokens": 8192,
+      "api_base": "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}",
+      "api_key": "${OPENROUTER_API_KEY}"
+    }
+  },
+  "media": {
+    "image": {
+      "resolution": "1024x768",
+      "quality": "high",
+      "style": "ancient_horror",
+      "ddim_steps": 40,
+      "model_id": 8
+    },
+    "audio": {
+      "voice_id": "7468512265134932019",
+      "voice_speed": 1.2,
+      "voice_volume": 1.0,
+      "background_music_volume": 0.3
+    }
+  },
+  "video": {
+    "resolution": "1440x1080",
+    "fps": 30,
+    "format": "mp4",
+    "enable_subtitles": true,
+    "enable_keyframes": true
+  },
+  "subtitle": {
+    "max_line_length": 25,
+    "split_priority": [
+      "。",
+      "！",
+      "？",
+      "，",
+      ",",
+      "：",
+      ":",
+      "、",
+      "；",
+      ";",
+      " "
+    ],
+    "main_font_size": 7,
+    "title_font_size": 40,
+    "main_color": "#FFFFFF",
+    "main_border_color": "#000000",
+    "title_color": "#000000",
+    "title_border_color": "#ffffff"
+  },
+  "animation": {
+    "scene_scale_range": [
+      1.0,
+      1.5
+    ],
+    "character_scale_sequence": [
+      2.0,
+      1.2,
+      1.0
+    ],
+    "character_scale_timing": [
+      0,
+      533333
+    ],
+    "easing": "linear"
+  },
+  "cache": {
+    "enabled": true,
+    "ttl_hours": 24,
+    "max_size_mb": 1024
+  }
+}

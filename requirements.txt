@@ -1,0 +1,47 @@
+# Core dependencies
+asyncio>=3.4.3
+aiohttp>=3.8.0
+aiofiles>=0.8.0
+
+# LLM and AI services
+openai>=1.0.0
+anthropic>=0.7.0
+
+# Image processing
+Pillow>=9.0.0
+requests>=2.28.0
+rembg>=2.0.0
+
+# Audio processing  
+pydub>=0.25.1
+mutagen>=1.46.0
+
+# Video processing
+ffmpeg-python>=0.2.0
+moviepy>=1.0.3
+
+# Configuration and data
+python-dotenv>=0.19.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Logging and utilities
+loguru>=0.6.0
+tqdm>=4.64.0
+click>=8.0.0
+
+# File format support
+python-magic>=0.4.24
+
+# HTTP client
+httpx>=0.24.0
+
+# JSON schema validation
+jsonschema>=4.0.0
+
+# Async database support (optional)
+aiosqlite>=0.17.0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0

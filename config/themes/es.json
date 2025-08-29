@@ -1,0 +1,68 @@
+{
+  "theme_categories": {
+    "Guerra Antigua": [
+      "La Batalla de los Acantilados Rojos",
+      "Qin Shi Huang Unifica China",
+      "La Última Batalla de Xiang Yu en Wujiang", 
+      "Campaña del Emperador Wu contra Xiongnu",
+      "Yue Fei Lucha contra la Dinastía Jin",
+      "La Conquista Occidental de Genghis Khan",
+      "Batalla del Río Fei - Derrota de Qin Anterior",
+      "Batalla de Changping - Masacre de Bai Qi",
+      "Batalla de Guandu - Victoria de Cao Cao",
+      "Batalla de Yiling - Gran Derrota de Liu Bei"
+    ],
+    "Secretos Imperiales": [
+      "Wu Zetian se Convierte en Emperatriz",
+      "Yang Guifei y la Rebelión de An Lushan",
+      "La Regencia de la Emperatriz Viuda Cixi",
+      "El Emperador Kangxi Suprime los Tres Feudatorios",
+      "El Misterio de la Sucesión de Yongzheng",
+      "Las Giras del Sur del Emperador Qianlong",
+      "El Emperador Yongle Usurpa el Trono de su Sobrino",
+      "Song Taizu Destituye Generales con Vino",
+      "Desastre de Brujería del Emperador Wu",
+      "Incidente de la Pendiente Mawei del Emperador Xuanzong"
+    ],
+    "Leyendas Populares": [
+      "Los Casos del Juez Bao",
+      "Leyendas del Buda Viviente Ji Gong",
+      "La Leyenda de la Serpiente Blanca",
+      "La Historia de los Amantes Mariposa", 
+      "Meng Jiangnu Llora en la Gran Muralla",
+      "El Vaquero y la Tejedora",
+      "Chang'e Volando a la Luna",
+      "Hou Yi Disparando Nueve Soles",
+      "Jingwei Llenando el Mar",
+      "Kuafu Persiguiendo el Sol"
+    ],
+    "Cuentos Heroicos": [
+      "Guan Yu Pasa Cinco Barreras",
+      "Zhao Yun Rescata a Liu Shan en Changban",
+      "Mulan se Une al Ejército por su Padre",
+      "La Madre de Yue Fei Tatúa la Lealtad",
+      "Canción de la Rectitud de Wen Tianxiang",
+      "Shi Kefa Defiende Yangzhou",
+      "Huo Qubing Sella Wolf Juxu",
+      "Wei Qing el General Volador de Ciudad Dragón", 
+      "Qi Jiguang Héroe Anti-Japonés",
+      "Zheng Chenggong Recaptura Taiwán"
+    ],
+    "Leyendas Estratégicas": [
+      "Zhuge Liang Pide Prestado Flechas con Barcos de Paja",
+      "Sima Yi Finge Enfermedad para Engañar a Cao Shuang",
+      "Carrera de Caballos de Tian Ji - Estrategia de Sun Bin",
+      "Batalla de Última Resistencia de Han Xin",
+      "Zhang Liang Recibe Libro Bajo Puente",
+      "Complot de Contrainteligencia de Chen Ping",
+      "Plan Inteligente de Jia Xu para Salvar a Dong Zhuo",
+      "Talento Ministerial de Xun Yu",
+      "Cálculos Divinos de Guo Jia",
+      "Estrategias del Polluelo Fénix Pang Tong"
+    ]
+  },
+  "batch_config": {
+    "themes_per_batch": 5,
+    "concurrent_processing": 3
+  }
+}

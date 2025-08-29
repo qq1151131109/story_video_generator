@@ -1,0 +1,39 @@
+Based on the theme: {{theme}}, generate an immersive historical story of about 1000 words using the following structure:
+
+1. Suspenseful Opening (100 words): Start with a question to create suspense
+   - Begin with "Really?" or "Did you know?"
+   - Pose a shocking historical question
+   - Spark audience curiosity
+
+2. Identity Immersion (200 words): Use second person "you" to let audience embody historical figures
+   - Use "You are..." sentence patterns
+   - Describe specific historical scenes and environments
+   - Let audience feel the situation of historical characters
+
+3. Conflict Escalation (300 words): Describe the core contradictions of historical events
+   - Detail the background of historical conflicts
+   - Show the opposition of various forces
+   - Create a tense atmosphere
+
+4. Resolution Details (300 words): Reveal details of key turning points
+   - Describe decisive historical moments
+   - Show crucial choices of characters
+   - Reveal historical turning points
+
+5. Thematic Conclusion (100 words): Highlight historical significance
+   - Summarize the impact of historical events
+   - Point out the enlightening meaning of history
+   - Give audience profound thoughts
+
+Requirements:
+- Extensive use of sensory descriptions (visual, auditory, tactile)
+- Use short sentences to create tense rhythm
+- No more than 3 sentences per paragraph
+- Include historical professional terms
+- Emotional rendering should be in place
+- Total word count should be controlled between 900-1100 words
+
+Historical Background Requirements:
+- Ensure accuracy of historical facts
+- Appropriately add dramatic detail descriptions
+- Maintain the seriousness and educational significance of history
