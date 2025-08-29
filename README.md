@@ -90,6 +90,18 @@ python main.py --test
 python main.py
 ```
 
+## 🎬 工作流程图
+
+详细的系统工作流程请查看：[WORKFLOW_DIAGRAM.md](WORKFLOW_DIAGRAM.md)
+
+包含完整的：
+- 🎯 系统架构总览
+- 📝 内容生成流水线详解  
+- 🎨 媒体生成流程图
+- 🎞️ 视频处理时序图
+- 🔄 API容错和缓存机制
+- 📊 性能监控流程
+
 ## 📖 使用指南
 
 ### 基础用法
