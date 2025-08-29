@@ -54,7 +54,9 @@
       "quality": "high",
       "style": "ancient_horror",
       "ddim_steps": 40,
-      "model_id": 8
+      "model_id": 8,
+      "primary_provider": "gemini",
+      "fallback_providers": ["runninghub", "openai", "stability"]
     },
     "audio": {
       "voice_id": "7468512265134932019",

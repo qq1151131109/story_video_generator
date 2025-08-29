@@ -106,15 +106,25 @@ def update_llm_config():
     print("\n💡 推荐模型使用策略:")
     
     if available_apis['openrouter']:
-        print("  🆓 免费模型: qwen/qwen3-coder:free (中文内容)")
-        print("  💰 低价模型: google/gemini-2.0-flash-001 (综合最佳)")
-        print("  💎 高端模型: google/gemini-2.5-flash (付费高质量)")
+        print("  📝 LLM模型:")
+        print("    🆓 免费模型: qwen/qwen3-coder:free (中文内容)")
+        print("    💰 低价模型: google/gemini-2.0-flash-001 (综合最佳)")
+        print("    💎 高端模型: google/gemini-2.5-flash (付费高质量)")
+        print("  🎨 图像生成:")
+        print("    🆓 免费版本: google/gemini-2.5-flash-image-preview:free")
+        print("    💎 付费版本: google/gemini-2.5-flash-image-preview ($0.03/图)")
     
     if available_apis['deepseek']:
         print("  🇨🇳 中文专用: DeepSeek (deepseek-chat)")
         
     if available_apis['qwen']:
         print("  🌏 阿里云: Qwen (qwen-turbo)")
+    
+    print("\n🚀 Gemini 2.5 Flash Image Preview 特色功能:")
+    print("  💬 对话式图像生成和编辑")
+    print("  🎯 角色一致性保持")
+    print("  ✏️ 精确的局部编辑")
+    print("  🧠 结合世界知识生成更准确图像")
 
 def main():
     """主函数"""

@@ -1,10 +1,11 @@
 """
 图像生成器 - 多提供商图像生成支持
-支持RunningHub、OpenAI DALL-E、Stability AI等提供商
+支持Gemini 2.5 Flash Image Preview、RunningHub、OpenAI DALL-E、Stability AI等提供商
 """
 import asyncio
 import aiohttp
 import base64
+import os
 import time
 from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
@@ -47,7 +48,8 @@ class ImageGenerator:
     图像生成器 - 支持多个提供商
     
     支持的提供商：
-    1. RunningHub - 主要提供商（对应原工作流）
+    1. Gemini 2.5 Flash Image Preview - 主要提供商（Google最新文生图）
+    2. RunningHub - 备用提供商1（对应原工作流）
     2. OpenAI DALL-E - 备用
     3. Stability AI - 备用
     """
@@ -65,14 +67,19 @@ class ImageGenerator:
         
         # API密钥
         self.api_keys = {
+            'gemini': config_manager.get_api_key('openrouter'),  # Gemini通过OpenRouter访问
             'runninghub': config_manager.get_api_key('runninghub'),
             'openai': config_manager.get_api_key('openrouter'),  # 使用OpenRouter访问OpenAI
             'stability': config_manager.get_api_key('stability')
         }
         
+        # Gemini模型配置
+        self.gemini_image_model = os.getenv('GEMINI_IMAGE_MODEL', 'google/gemini-2.5-flash-image-preview')
+        self.gemini_image_model_free = os.getenv('GEMINI_IMAGE_MODEL_FREE', 'google/gemini-2.5-flash-image-preview:free')
+        
         # 提供商优先级
-        self.primary_provider = self.image_config.get('primary_provider', 'runninghub')
-        self.fallback_providers = self.image_config.get('fallback_providers', ['openai', 'stability'])
+        self.primary_provider = self.image_config.get('primary_provider', 'gemini')  # 默认使用Gemini
+        self.fallback_providers = self.image_config.get('fallback_providers', ['runninghub', 'openai', 'stability'])
         
         # 默认样式提示词
         self._load_style_prompts()
@@ -135,7 +142,9 @@ class ImageGenerator:
                 try:
                     self.logger.info(f"Generating image with {provider_name}: {request.prompt[:50]}...")
                     
-                    if provider_name == 'runninghub':
+                    if provider_name == 'gemini':
+                        result = await self._generate_with_gemini(request, full_prompt)
+                    elif provider_name == 'runninghub':
                         result = await self._generate_with_runninghub(request, full_prompt)
                     elif provider_name == 'openai':
                         result = await self._generate_with_openai(request, full_prompt)
@@ -260,6 +269,95 @@ class ImageGenerator:
                     generation_time=time.time() - start_time
                 )
     
+    async def _generate_with_gemini(self, request: ImageGenerationRequest, 
+                                  full_prompt: str) -> GeneratedImage:
+        """使用Gemini 2.5 Flash Image Preview生成图像"""
+        start_time = time.time()
+        
+        # OpenRouter API配置
+        api_url = f"{os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')}/chat/completions"
+        
+        # 根据质量选择模型（免费版或付费版）
+        model = self.gemini_image_model_free if request.quality == "standard" else self.gemini_image_model
+        
+        # 构建消息 - Gemini的图像生成是通过chat completions接口
+        messages = [
+            {
+                "role": "user", 
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Generate an image with the following description: {full_prompt}. Style: {request.style}. Make it {request.width}x{request.height} pixels, {request.quality} quality."
+                    }
+                ]
+            }
+        ]
+        
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": 4096,
+            "temperature": 0.8,
+            "extra": {
+                "image_generation": True,
+                "image_size": f"{request.width}x{request.height}",
+                "image_quality": request.quality
+            }
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_keys['gemini']}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/qq1151131109/story_video_generator",
+            "X-Title": "Historical Story Generator"
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(api_url, json=payload, headers=headers, timeout=120) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"Gemini API error {response.status}: {error_text}")
+                
+                result = await response.json()
+                
+                if 'choices' not in result or not result['choices']:
+                    raise Exception("No choices in Gemini response")
+                
+                choice = result['choices'][0]
+                
+                # Gemini可能返回图像URL或base64数据
+                image_data = None
+                if 'message' in choice and 'content' in choice['message']:
+                    content = choice['message']['content']
+                    
+                    # 检查是否包含图像数据
+                    if isinstance(content, str) and 'data:image' in content:
+                        # 提取base64数据
+                        base64_part = content.split('data:image/')[1].split(';base64,')[1]
+                        image_data = base64.b64decode(base64_part)
+                    elif isinstance(content, list):
+                        for item in content:
+                            if item.get('type') == 'image_url' and 'url' in item:
+                                # 下载图像
+                                async with session.get(item['url']) as img_response:
+                                    if img_response.status == 200:
+                                        image_data = await img_response.read()
+                                        break
+                
+                if not image_data:
+                    raise Exception("No image data found in Gemini response")
+                
+                return GeneratedImage(
+                    image_data=image_data,
+                    prompt=full_prompt,
+                    width=request.width,
+                    height=request.height,
+                    file_size=len(image_data),
+                    provider='gemini',
+                    model=model,
+                    generation_time=time.time() - start_time
+                )
+
     async def _generate_with_openai(self, request: ImageGenerationRequest, 
                                   full_prompt: str) -> GeneratedImage:
         """使用OpenAI DALL-E生成图像"""
