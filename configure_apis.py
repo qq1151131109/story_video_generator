@@ -112,7 +112,7 @@ def update_llm_config():
         print("    💎 高端模型: google/gemini-2.5-flash (付费高质量)")
         print("  🎨 图像生成:")
         print("    🆓 免费版本: google/gemini-2.5-flash-image-preview:free")
-        print("    💎 付费版本: google/gemini-2.5-flash-image-preview ($0.03/图)")
+        print("    💎 付费版本: google/gemini-2.5-flash-image-preview ($0.00003/图像)")
     
     if available_apis['deepseek']:
         print("  🇨🇳 中文专用: DeepSeek (deepseek-chat)")
