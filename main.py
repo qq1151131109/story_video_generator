@@ -11,6 +11,10 @@ import time
 # 添加项目根目录到Python路径
 sys.path.insert(0, str(Path(__file__).parent))
 
+# 加载环境变量
+from load_env import load_env_file
+load_env_file()
+
 from core.config_manager import ConfigManager
 from core.cache_manager import CacheManager
 from utils.file_manager import FileManager

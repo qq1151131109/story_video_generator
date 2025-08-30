@@ -11,9 +11,9 @@ import logging
 import openai
 from dataclasses import dataclass
 
-from ..core.config_manager import ConfigManager, ModelConfig
-from ..core.cache_manager import CacheManager
-from ..utils.file_manager import FileManager
+from core.config_manager import ConfigManager, ModelConfig
+from core.cache_manager import CacheManager
+from utils.file_manager import FileManager
 
 @dataclass
 class Scene:
@@ -61,6 +61,9 @@ class SceneSplitter:
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
+        # 支持的语言 - 必须在加载提示词模板之前设置
+        self.supported_languages = self.config.get_supported_languages()
+        
         # 获取LLM配置
         self.llm_config = self.config.get_llm_config('scene_splitting')
         
@@ -69,9 +72,6 @@ class SceneSplitter:
         
         # 加载提示词模板
         self._load_prompt_templates()
-        
-        # 支持的语言
-        self.supported_languages = self.config.get_supported_languages()
     
     def _setup_openai_client(self):
         """配置OpenAI客户端"""
@@ -115,7 +115,7 @@ class SceneSplitter:
 ### 技能1：场景分割
 1. 将输入的历史故事文案分割为8个独立场景
 2. 每个场景应该包含完整的故事片段，时长约3秒
-3. 为每个场景生成适合的图像描述提示词
+3. 为每个场景生成详细的图像描述提示词，必须包含具体的人物、服装、环境、动作等细节
 4. 确保场景之间的连贯性和逻辑性
 5. 生成适合的字幕文本
 
@@ -128,7 +128,7 @@ class SceneSplitter:
     {
       "sequence": 1,
       "content": "场景1的故事内容",
-      "image_prompt": "场景1的图像描述",
+      "image_prompt": "详细的图像描述，包含人物外貌、服装、环境、动作等具体细节，如：古代中国，朱元璋身穿破旧布衣，面容憔悴，在荒芜的田野中乞讨，背景是战乱后的废墟，昏暗色调，历史写实风格",
       "duration_seconds": 3.0,
       "animation_type": "轻微放大",
       "subtitle_text": "场景1的字幕文本"
@@ -137,10 +137,20 @@ class SceneSplitter:
 }
 ```
 
+## 重要提醒 - 必须遵守
+- image_prompt绝对不能使用"历史场景1"、"历史场景2"这样的通用占位符
+- image_prompt必须根据场景内容生成具体的图像描述，包含：
+  * 具体的人物外貌和动作
+  * 详细的服装和装饰
+  * 明确的环境和背景
+  * 历史时代特征
+- 示例正确格式："古代中国战国时期，秦始皇嬴政身穿黑色龙袍，面容威严，站在咸阳宫大殿中，背景是华丽的宫殿建筑，昏暗灯光，威严肃穆的氛围"
+- 示例错误格式："历史场景1"、"场景描述"、"图像提示"等
+
 ## 限制
 1. 必须输出恰好8个场景
 2. 每个场景时长固定为3秒
-3. 图像描述要详细且符合历史背景
+3. 图像描述要详细且符合历史背景，包含具体细节
 4. 字幕文本要简洁明了
 
 现在请分割以下历史故事文案：
@@ -154,7 +164,7 @@ You are a professional video storyboard artist responsible for splitting histori
 ### Skill 1: Scene Splitting
 1. Split the input historical story script into 8 independent scenes
 2. Each scene should contain a complete story segment, lasting about 3 seconds
-3. Generate appropriate image description prompts for each scene
+3. Generate detailed image description prompts for each scene, including specific details about characters, clothing, environment, and actions
 4. Ensure coherence and logic between scenes
 5. Generate suitable subtitle text
 
@@ -167,7 +177,7 @@ Please output strictly in the following JSON format:
     {
       "sequence": 1,
       "content": "Story content for scene 1",
-      "image_prompt": "Image description for scene 1", 
+      "image_prompt": "Detailed image description with specific details about characters, clothing, environment, actions, e.g.: Ancient China, Zhu Yuanzhang wearing tattered cloth robes, gaunt face, begging in barren fields, background of post-war ruins, dim tones, historical realistic style", 
       "duration_seconds": 3.0,
       "animation_type": "slight zoom",
       "subtitle_text": "Subtitle text for scene 1"
@@ -176,10 +186,15 @@ Please output strictly in the following JSON format:
 }
 ```
 
+## Important Notes
+- image_prompt must be detailed descriptions with specific details about characters, clothing, environment, actions
+- Do not use generic placeholders like "Historical Scene 1", "Scene Description"
+- Each scene's image_prompt should be unique and specific
+
 ## Constraints
 1. Must output exactly 8 scenes
 2. Each scene duration is fixed at 3 seconds
-3. Image descriptions should be detailed and historically accurate
+3. Image descriptions should be detailed and historically accurate with specific details
 4. Subtitle text should be concise and clear
 
 Now please split the following historical story script:
@@ -307,13 +322,10 @@ Ahora por favor divide el siguiente guión de historia histórica:
             self.cache.set('scenes', cache_key, cache_data)
             
             # 记录日志
-            self.config.get_logger('story_generator').log_content_generation(
-                task_type='scene_splitting',
-                language=request.language,
-                input_size=len(request.script_content),
-                output_size=len(json.dumps(cache_data, ensure_ascii=False)),
-                processing_time=result.split_time
-            )
+            logger = self.config.get_logger('story_generator')
+            logger.info(f"Content generation - Type: scene_splitting, Language: {request.language}, "
+                       f"Input: {len(request.script_content)} chars, Output: {len(json.dumps(cache_data, ensure_ascii=False))} chars, "
+                       f"Time: {result.split_time:.2f}s")
             
             self.logger.info(f"Split scenes successfully: {len(scenes)} scenes, {total_duration:.1f}s total duration")
             
@@ -324,14 +336,9 @@ Ahora por favor divide el siguiente guión de historia histórica:
             self.logger.error(f"Scene splitting failed: {e}")
             
             # 记录错误日志
-            self.config.get_logger('story_generator').log_content_generation(
-                task_type='scene_splitting',
-                language=request.language,
-                input_size=len(request.script_content),
-                output_size=0,
-                processing_time=processing_time,
-                success=False
-            )
+            logger = self.config.get_logger('story_generator')
+            logger.error(f"Content generation failed - Type: scene_splitting, Language: {request.language}, "
+                        f"Input: {len(request.script_content)} chars, Time: {processing_time:.2f}s")
             
             raise
     
@@ -477,7 +484,7 @@ Ahora por favor divide el siguiente guión de historia histórica:
                 scene = Scene(
                     sequence=i + 1,
                     content=segment,
-                    image_prompt=f"历史场景 {i + 1}",
+                    image_prompt=self._generate_fallback_image_prompt(segment, i + 1),
                     duration_seconds=request.scene_duration,
                     animation_type="轻微放大",
                     subtitle_text=segment[:50] + "..." if len(segment) > 50 else segment
@@ -498,7 +505,7 @@ Ahora por favor divide el siguiente guión de historia histórica:
                 scene = Scene(
                     sequence=i + 1,
                     content=content,
-                    image_prompt=f"历史场景 {i + 1}",
+                    image_prompt=self._generate_fallback_image_prompt(content, i + 1),
                     duration_seconds=request.scene_duration,
                     animation_type="轻微放大",
                     subtitle_text=content[:50] + "..." if len(content) > 50 else content
@@ -507,6 +514,69 @@ Ahora por favor divide el siguiente guión de historia histórica:
                 scenes.append(scene)
         
         return scenes
+    
+    def _generate_fallback_image_prompt(self, content: str, sequence: int) -> str:
+        """
+        生成退化图像提示词（基于内容而非占位符）
+        
+        Args:
+            content: 场景内容
+            sequence: 场景序号
+        
+        Returns:
+            str: 图像提示词
+        """
+        import re
+        
+        # 提取关键词来生成图像描述
+        keywords = {
+            'characters': [],
+            'places': [],
+            'actions': [],
+            'objects': []
+        }
+        
+        # 常见历史人物名称
+        historical_figures = ['秦始皇', '嬴政', '朱元璋', '汉武帝', '唐太宗', '康熙', '乾隆', '武则天', '李世民', '刘邦', '项羽']
+        for figure in historical_figures:
+            if figure in content:
+                keywords['characters'].append(figure)
+        
+        # 常见地点
+        places = ['咸阳', '长安', '北京', '南京', '洛阳', '汴梁', '宫殿', '皇宫', '城墙', '战场', '朝堂']
+        for place in places:
+            if place in content:
+                keywords['places'].append(place)
+        
+        # 动作词
+        actions = ['战斗', '征战', '统一', '建立', '推翻', '称帝', '登基', '治理', '改革', '变法']
+        for action in actions:
+            if action in content:
+                keywords['actions'].append(action)
+        
+        # 物品
+        objects = ['龙袍', '铠甲', '兵器', '城池', '军队', '旗帜', '宫殿', '建筑']
+        for obj in objects:
+            if obj in content:
+                keywords['objects'].append(obj)
+        
+        # 根据关键词组合生成描述
+        if keywords['characters']:
+            character = keywords['characters'][0]
+            if keywords['places']:
+                place = keywords['places'][0]
+                return f"古代中国，{character}在{place}，身穿古代帝王服饰，威严庄重，历史写实风格，高清画质，昏暗色调，庄严肃穆的氛围"
+            else:
+                return f"古代中国，{character}身穿龙袍，面容威严，古代宫殿背景，历史写实风格，高清画质，威严庄重的氛围"
+        elif keywords['places']:
+            place = keywords['places'][0]
+            return f"古代中国{place}，宏伟建筑，古代建筑风格，昏暗灯光，历史氛围浓厚，高清画质，庄严肃穆"
+        elif keywords['actions']:
+            action = keywords['actions'][0]
+            return f"古代中国历史场景，{action}主题，古代服饰，传统建筑背景，历史写实风格，高清画质，威严肃穆的氛围"
+        else:
+            # 最后的通用描述
+            return f"古代中国历史场景，传统服装，古代建筑，昏暗色调，历史写实风格，高清画质，庄严肃穆的氛围"
     
     def _scene_to_dict(self, scene: Scene) -> Dict[str, Any]:
         """将Scene对象转换为字典"""

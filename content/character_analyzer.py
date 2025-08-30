@@ -11,9 +11,9 @@ import logging
 import openai
 from dataclasses import dataclass
 
-from ..core.config_manager import ConfigManager, ModelConfig
-from ..core.cache_manager import CacheManager
-from ..utils.file_manager import FileManager
+from core.config_manager import ConfigManager, ModelConfig
+from core.cache_manager import CacheManager
+from utils.file_manager import FileManager
 
 @dataclass
 class Character:
@@ -61,6 +61,9 @@ class CharacterAnalyzer:
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
+        # 支持的语言 - 必须在加载提示词模板之前设置
+        self.supported_languages = self.config.get_supported_languages()
+        
         # 获取LLM配置
         self.llm_config = self.config.get_llm_config('character_analysis')
         
@@ -69,9 +72,6 @@ class CharacterAnalyzer:
         
         # 加载提示词模板
         self._load_prompt_templates()
-        
-        # 支持的语言
-        self.supported_languages = self.config.get_supported_languages()
     
     def _setup_openai_client(self):
         """配置OpenAI客户端"""
@@ -316,13 +316,10 @@ Ahora por favor analiza los personajes en la siguiente historia histórica:
             self.cache.set('characters', cache_key, cache_data)
             
             # 记录日志
-            self.config.get_logger('story_generator').log_content_generation(
-                task_type='character_analysis',
-                language=request.language,
-                input_size=len(request.script_content),
-                output_size=len(json.dumps(cache_data, ensure_ascii=False)),
-                processing_time=result.analysis_time
-            )
+            logger = self.config.get_logger('story_generator')
+            logger.info(f"Content generation - Type: character_analysis, Language: {request.language}, "
+                       f"Input: {len(request.script_content)} chars, Output: {len(json.dumps(cache_data, ensure_ascii=False))} chars, "
+                       f"Time: {result.analysis_time:.2f}s")
             
             self.logger.info(f"Analyzed characters successfully: {len(characters)} characters in {result.analysis_time:.2f}s")
             
@@ -333,14 +330,9 @@ Ahora por favor analiza los personajes en la siguiente historia histórica:
             self.logger.error(f"Character analysis failed: {e}")
             
             # 记录错误日志
-            self.config.get_logger('story_generator').log_content_generation(
-                task_type='character_analysis',
-                language=request.language,
-                input_size=len(request.script_content),
-                output_size=0,
-                processing_time=processing_time,
-                success=False
-            )
+            logger = self.config.get_logger('story_generator')
+            logger.error(f"Content generation failed - Type: character_analysis, Language: {request.language}, "
+                        f"Input: {len(request.script_content)} chars, Time: {processing_time:.2f}s")
             
             raise
     

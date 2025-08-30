@@ -3,7 +3,7 @@
     "output_dir": "output",
     "temp_dir": "output/temp",
     "log_level": "INFO",
-    "max_concurrent_tasks": 6,
+    "max_concurrent_tasks": 3,
     "supported_languages": [
       "zh",
       "en",
@@ -55,14 +55,17 @@
       "style": "ancient_horror",
       "ddim_steps": 40,
       "model_id": 8,
-      "primary_provider": "gemini",
-      "fallback_providers": ["runninghub", "openai", "stability"]
+      "primary_provider": "runninghub",
+      "fallback_providers": ["openai"]
     },
     "audio": {
-      "voice_id": "7468512265134932019",
+      "voice_id": "21m00Tcm4TlvDq8ikWAM",
       "voice_speed": 1.2,
       "voice_volume": 1.0,
-      "background_music_volume": 0.3
+      "background_music_volume": 0.3,
+      "primary_provider": "minimax",
+      "fallback_providers": ["elevenlabs"],
+      "minimax_voice": "female-tianmei-jingpin"
     }
   },
   "video": {

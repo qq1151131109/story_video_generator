@@ -11,9 +11,9 @@ import logging
 import openai
 from dataclasses import dataclass
 
-from ..core.config_manager import ConfigManager, ModelConfig
-from ..core.cache_manager import CacheManager
-from ..utils.file_manager import FileManager
+from core.config_manager import ConfigManager, ModelConfig
+from core.cache_manager import CacheManager
+from utils.file_manager import FileManager
 
 @dataclass
 class ScriptGenerationRequest:
@@ -53,6 +53,9 @@ class ScriptGenerator:
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
+        # 支持的语言 - 必须在加载提示词模板之前设置
+        self.supported_languages = self.config.get_supported_languages()
+        
         # 获取LLM配置
         self.llm_config = self.config.get_llm_config('script_generation')
         
@@ -61,9 +64,6 @@ class ScriptGenerator:
         
         # 加载提示词模板
         self._load_prompt_templates()
-        
-        # 支持的语言
-        self.supported_languages = self.config.get_supported_languages()
     
     def _setup_openai_client(self):
         """配置OpenAI客户端"""
@@ -234,13 +234,10 @@ Por favor, crea una historia histórica basada en el siguiente tema:
             self.cache.set('scripts', cache_key, cache_data)
             
             # 记录日志
-            self.config.get_logger('story_generator').log_content_generation(
-                task_type='script_generation',
-                language=request.language,
-                input_size=len(request.theme),
-                output_size=len(content),
-                processing_time=result.generation_time
-            )
+            logger = self.config.get_logger('story_generator')
+            logger.info(f"Content generation - Type: script_generation, Language: {request.language}, "
+                       f"Input: {len(request.theme)} chars, Output: {len(content)} chars, "
+                       f"Time: {result.generation_time:.2f}s")
             
             self.logger.info(f"Generated script successfully: {result.word_count} chars in {result.generation_time:.2f}s")
             
@@ -251,14 +248,9 @@ Por favor, crea una historia histórica basada en el siguiente tema:
             self.logger.error(f"Script generation failed: {e}")
             
             # 记录错误日志
-            self.config.get_logger('story_generator').log_content_generation(
-                task_type='script_generation',
-                language=request.language,
-                input_size=len(request.theme),
-                output_size=0,
-                processing_time=processing_time,
-                success=False
-            )
+            logger = self.config.get_logger('story_generator')
+            logger.error(f"Content generation failed - Type: script_generation, Language: {request.language}, "
+                        f"Input: {len(request.theme)} chars, Time: {processing_time:.2f}s")
             
             raise
     

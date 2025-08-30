@@ -7,15 +7,16 @@ import aiohttp
 import base64
 import time
 import json
+import os
 from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
 import logging
 from dataclasses import dataclass
 import hashlib
 
-from ..core.config_manager import ConfigManager
-from ..core.cache_manager import CacheManager
-from ..utils.file_manager import FileManager
+from core.config_manager import ConfigManager
+from core.cache_manager import CacheManager
+from utils.file_manager import FileManager
 
 @dataclass
 class AudioGenerationRequest:
@@ -23,6 +24,7 @@ class AudioGenerationRequest:
     text: str                     # 要合成的文本
     language: str                 # 语言代码
     voice_id: str = ""           # 音色ID
+    voice_style: str = ""        # 语音风格
     speed: float = 1.2           # 语速（对应原工作流）
     volume: float = 1.0          # 音量
     format: str = "mp3"          # 输出格式
@@ -39,6 +41,7 @@ class GeneratedAudio:
     provider: str                # 提供商
     format: str                  # 音频格式
     generation_time: float       # 生成耗时
+    file_path: Optional[str] = None  # 保存的文件路径
 
 class AudioGenerator:
     """
@@ -62,14 +65,14 @@ class AudioGenerator:
         
         # API密钥
         self.api_keys = {
-            'azure': config_manager.get_api_key('azure'),
+            'minimax': config_manager.get_api_key('minimax'),
             'elevenlabs': config_manager.get_api_key('elevenlabs'),
             'openai': config_manager.get_api_key('openrouter')
         }
         
-        # 提供商优先级
-        self.primary_provider = self.audio_config.get('primary_provider', 'azure')
-        self.fallback_providers = self.audio_config.get('fallback_providers', ['elevenlabs', 'openai'])
+        # 提供商优先级 - MiniMax作为主要提供商（同步版本）
+        self.primary_provider = self.audio_config.get('primary_provider', 'minimax')
+        self.fallback_providers = self.audio_config.get('fallback_providers', ['elevenlabs'])
         
         # 语音配置
         self._load_voice_configs()
@@ -78,8 +81,18 @@ class AudioGenerator:
     
     def _load_voice_configs(self):
         """加载语音配置"""
-        # 对应原工作流的悬疑解说音色配置
+        # 语音配置
         self.voice_configs = {
+            'minimax': {
+                'zh': {
+                    'voice_id': 'male-qn-qingse',  # MiniMax中文男声
+                    'style': 'audiobook'
+                },
+                'en': {
+                    'voice_id': 'male-en-01',  # MiniMax英文男声  
+                    'style': 'audiobook'
+                }
+            },
             'azure': {
                 'zh': {
                     'voice_id': 'zh-CN-XiaoxiaoNeural',  # 中文悬疑音色
@@ -140,8 +153,17 @@ class AudioGenerator:
                 cached_result['generation_time'] = time.time() - start_time
                 return GeneratedAudio(**cached_result)
             
-            # 选择提供商
-            providers_to_try = [provider] if provider else [self.primary_provider] + self.fallback_providers
+            # 智能选择提供商：中文使用MiniMax，英文使用ElevenLabs
+            if provider:
+                providers_to_try = [provider]
+            else:
+                if request.language == 'zh':
+                    providers_to_try = ['minimax'] + self.fallback_providers
+                elif request.language == 'en':
+                    providers_to_try = ['elevenlabs', 'minimax'] + [p for p in self.fallback_providers if p != 'elevenlabs']
+                else:
+                    # 其他语言使用默认策略
+                    providers_to_try = [self.primary_provider] + self.fallback_providers
             
             last_error = None
             for provider_name in providers_to_try:
@@ -152,7 +174,9 @@ class AudioGenerator:
                 try:
                     self.logger.info(f"Generating audio with {provider_name}: {request.text[:30]}...")
                     
-                    if provider_name == 'azure':
+                    if provider_name == 'minimax':
+                        result = await self._generate_with_minimax_sync(request)
+                    elif provider_name == 'azure':
                         result = await self._generate_with_azure(request)
                     elif provider_name == 'elevenlabs':
                         result = await self._generate_with_elevenlabs(request)
@@ -176,14 +200,17 @@ class AudioGenerator:
                     self.cache.set('audio', cache_key, cache_data)
                     
                     # 记录日志
-                    self.config.get_logger('story_generator').log_media_generation(
-                        media_type='audio',
-                        provider=provider_name,
-                        processing_time=result.generation_time,
-                        file_size=result.file_size
-                    )
+                    # 保存音频文件
+                    file_path = self.save_audio(result)
+                    result.file_path = file_path
+                    
+                    logger = self.config.get_logger('story_generator')
+                    logger.info(f"Media generation - Type: audio, Provider: {provider_name}, "
+                               f"Processing time: {result.generation_time:.2f}s, "
+                               f"File size: {result.file_size} bytes")
                     
                     self.logger.info(f"Generated audio successfully with {provider_name}: {result.duration_seconds:.1f}s, {result.file_size / 1024:.1f}KB")
+                    self.logger.info(f"Audio saved to: {file_path}")
                     
                     return result
                     
@@ -200,15 +227,94 @@ class AudioGenerator:
             self.logger.error(f"Audio generation failed after {processing_time:.2f}s: {e}")
             
             # 记录错误日志
-            self.config.get_logger('story_generator').log_media_generation(
-                media_type='audio',
-                provider='unknown',
-                processing_time=processing_time,
-                success=False
-            )
+            logger = self.config.get_logger('story_generator')
+            logger.error(f"Media generation failed - Type: audio, Provider: unknown, "
+                        f"Processing time: {processing_time:.2f}s")
             
             raise
     
+    async def _generate_with_minimax_sync(self, request: AudioGenerationRequest) -> GeneratedAudio:
+        """使用MiniMax同步TTS生成音频"""
+        start_time = time.time()
+        
+        # 获取语音配置
+        voice_config = self.voice_configs['minimax'].get(request.language, self.voice_configs['minimax']['zh'])
+        voice_id = request.voice_id or voice_config['voice_id']
+        
+        # 获取GroupId
+        group_id = os.getenv('MINIMAX_GROUP_ID')
+        if not group_id:
+            group_id = '1961322907531485224'  # 默认值
+        
+        # MiniMax同步TTS API
+        api_url = f"https://api.minimaxi.com/v1/t2a_v2?GroupId={group_id}"
+        
+        payload = {
+            "model": "speech-2.5-hd-preview",
+            "text": request.text,
+            "stream": False,  # 同步模式
+            "language_boost": "Chinese" if request.language == 'zh' else "auto",
+            "output_format": "hex",  # 返回hex编码
+            "voice_setting": {
+                "voice_id": voice_id,
+                "speed": request.speed,
+                "vol": request.volume,
+                "pitch": 0,
+                "emotion": "happy"
+            },
+            "audio_setting": {
+                "sample_rate": 32000,
+                "bitrate": 128000,
+                "format": "mp3",
+                "channel": 1
+            }
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_keys['minimax']}",
+            "Content-Type": "application/json"
+        }
+        
+        self.logger.info(f"Using MiniMax sync TTS with GroupId: {group_id}")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(api_url, json=payload, headers=headers, timeout=60) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"MiniMax sync API error {response.status}: {error_text}")
+                
+                result = await response.json()
+                
+                if result.get('base_resp', {}).get('status_code') != 0:
+                    error_msg = result.get('base_resp', {}).get('status_msg', 'Unknown error')
+                    raise Exception(f"MiniMax sync failed: {error_msg}")
+                
+                # 获取hex编码的音频数据
+                hex_audio = result.get('data', {}).get('audio')
+                if not hex_audio:
+                    raise Exception("No audio data in MiniMax response")
+                
+                # 解码hex数据为bytes
+                audio_data = bytes.fromhex(hex_audio)
+                
+                self.logger.info(f"MiniMax sync TTS completed: {len(audio_data)} bytes")
+                
+                # 估算音频时长
+                char_count = len(request.text)
+                estimated_duration = (char_count / 5.0) / request.speed
+                
+                return GeneratedAudio(
+                    audio_data=audio_data,
+                    text=request.text,
+                    language=request.language,
+                    voice_id=voice_id,
+                    duration_seconds=estimated_duration,
+                    file_size=len(audio_data),
+                    provider='minimax',
+                    format='mp3',
+                    generation_time=time.time() - start_time
+                )
+
     async def _generate_with_azure(self, request: AudioGenerationRequest) -> GeneratedAudio:
         """使用Azure TTS生成音频"""
         start_time = time.time()
@@ -364,6 +470,7 @@ class AudioGenerator:
         """获取Azure区域"""
         # 可以从配置中读取，默认使用eastus
         return self.config.get('media.audio.azure_region', 'eastus')
+    
     
     def generate_audio_sync(self, request: AudioGenerationRequest, 
                            provider: Optional[str] = None) -> GeneratedAudio:

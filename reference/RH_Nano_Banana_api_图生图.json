@@ -1,0 +1,52 @@
+{
+  "1": {
+    "inputs": {
+      "prompt": [
+        "16",
+        0
+      ],
+      "seed": 295397086,
+      "images": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "RH_Nano_Banana_Image2Image",
+    "_meta": {
+      "title": "RH_Nano_Banana_Image2Image"
+    }
+  },
+  "2": {
+    "inputs": {
+      "image": "61a52873b2f16cf3734dad1d20f704d32ca5f1d77896847f27a1e1ee72eb626d.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "13": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "16": {
+    "inputs": {
+      "prompt": "图中人物的1/7比例商业模型已制作完成，其风格写实，环境逼真。模型放置在带有圆形透明亚克力底座的电脑桌上。底座上没有任何文字。电脑屏幕上显示着模型的ZBrush建模过程。电脑屏幕旁边是一个BANDAI风格的玩具盒，上面印着原画。",
+      "seed": 1640,
+      "advanced_options": "force_english"
+    },
+    "class_type": "RH_Translator",
+    "_meta": {
+      "title": "Runninghub Translator"
+    }
+  }
+}

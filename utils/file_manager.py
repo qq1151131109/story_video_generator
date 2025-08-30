@@ -211,7 +211,8 @@ class FileManager:
             'audio': self.output_dir / "audio",
             'videos': self.output_dir / "videos",
             'subtitles': self.output_dir / "subtitles",
-            'logs': self.output_dir / "logs"
+            'logs': self.output_dir / "logs",
+            'temp': self.output_dir / "temp"
         }
         
         if category not in category_dirs:

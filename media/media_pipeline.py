@@ -8,13 +8,13 @@ from pathlib import Path
 import logging
 from dataclasses import dataclass
 
-from ..core.config_manager import ConfigManager
-from ..core.cache_manager import CacheManager
-from ..utils.file_manager import FileManager
-from ..content.scene_splitter import Scene, SceneSplitResult
-from ..content.character_analyzer import Character, CharacterAnalysisResult
-from .image_generator import ImageGenerator, ImageGenerationRequest, GeneratedImage
-from .audio_generator import AudioGenerator, AudioGenerationRequest, GeneratedAudio
+from core.config_manager import ConfigManager
+from core.cache_manager import CacheManager
+from utils.file_manager import FileManager
+from content.scene_splitter import Scene, SceneSplitResult
+from content.character_analyzer import Character, CharacterAnalysisResult
+from media.image_generator import ImageGenerator, ImageGenerationRequest, GeneratedImage
+from media.audio_generator import AudioGenerator, AudioGenerationRequest, GeneratedAudio
 
 @dataclass
 class MediaGenerationRequest:
@@ -152,122 +152,110 @@ class MediaPipeline:
             raise
     
     async def _generate_scene_media(self, scenes: List[Scene], language: str) -> List[SceneMedia]:
-        """生成场景媒体（图像+音频）"""
+        """生成场景媒体（图像+音频）- 使用受控并发"""
         self.logger.info(f"Generating media for {len(scenes)} scenes...")
         
+        # 分离图像和音频请求
+        image_requests = []
+        audio_requests = []
+        
+        for scene in scenes:
+            # 图像请求
+            prompt = scene.image_prompt if scene.image_prompt else f"历史场景：{scene.content}"
+            image_req = ImageGenerationRequest(
+                prompt=prompt,
+                style="ancient_horror"
+            )
+            image_requests.append((scene, image_req))
+            
+            # 音频请求  
+            audio_req = AudioGenerationRequest(
+                text=scene.content,
+                language=language
+            )
+            audio_requests.append((scene, audio_req))
+        
+        # 使用批量生成方法（带并发控制）
+        max_concurrent = self.config.get('general.max_concurrent_tasks', 3)
+        
+        # 批量生成图像
+        image_gen_requests = [req for _, req in image_requests]
+        generated_images = await self.image_generator.batch_generate_images(
+            image_gen_requests, max_concurrent
+        )
+        
+        # 批量生成音频  
+        audio_gen_requests = [req for _, req in audio_requests]
+        generated_audio = await self.audio_generator.batch_generate_audio(
+            audio_gen_requests, max_concurrent
+        )
+        
+        # 组合结果
         scene_media = []
         
-        # 并行生成每个场景的媒体
-        tasks = []
-        for scene in scenes:
-            task = self._generate_single_scene_media(scene, language)
-            tasks.append(task)
+        for i, scene in enumerate(scenes):
+            try:
+                # 检查是否有对应的媒体生成成功
+                image = generated_images[i] if i < len(generated_images) else None
+                audio = generated_audio[i] if i < len(generated_audio) else None
+                
+                if image and audio:
+                    scene_media.append(SceneMedia(
+                        scene=scene,
+                        image=image,
+                        audio=audio
+                    ))
+                    self.logger.info(f"Scene {i+1} media generation successful")
+                else:
+                    self.logger.error(f"Scene {i+1} media generation failed: missing image or audio")
+                    
+            except Exception as e:
+                self.logger.error(f"Scene {i+1} media combination failed: {e}")
         
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                self.logger.error(f"Scene {i+1} media generation failed: {result}")
-                # 创建空的场景媒体
-                scene_media.append(None)
-            else:
-                scene_media.append(result)
-        
-        # 过滤掉失败的场景
-        scene_media = [sm for sm in scene_media if sm is not None]
-        
+        self.logger.info(f"Generated {len(scene_media)} complete scene media out of {len(scenes)} scenes")
         return scene_media
     
-    async def _generate_single_scene_media(self, scene: Scene, language: str) -> SceneMedia:
-        """生成单个场景的媒体"""
-        # 并行生成图像和音频
-        image_task = self._generate_scene_image(scene, language)
-        audio_task = self._generate_scene_audio(scene, language)
-        
-        image, audio = await asyncio.gather(image_task, audio_task)
-        
-        return SceneMedia(
-            scene=scene,
-            image=image,
-            audio=audio
-        )
     
-    async def _generate_scene_image(self, scene: Scene, language: str) -> GeneratedImage:
-        """生成场景图像"""
-        # 使用场景的图像提示词
-        prompt = scene.image_prompt
-        
-        # 如果提示词为空，使用场景内容生成
-        if not prompt:
-            prompt = f"历史场景：{scene.content}"
-        
-        request = ImageGenerationRequest(
-            prompt=prompt,
-            style="ancient_horror",
-            width=self.image_config.get('resolution', '1024x768').split('x')[0],
-            height=self.image_config.get('resolution', '1024x768').split('x')[1],
-            quality=self.image_config.get('quality', 'high'),
-            steps=self.image_config.get('ddim_steps', 40),
-            model_id=self.image_config.get('model_id', 8)
-        )
-        
-        return await self.image_generator.generate_image_async(request)
     
-    async def _generate_scene_audio(self, scene: Scene, language: str) -> GeneratedAudio:
-        """生成场景音频"""
-        # 使用场景的字幕文本或内容
-        text = scene.subtitle_text or scene.content
-        
-        request = AudioGenerationRequest(
-            text=text,
-            language=language,
-            voice_id=self.audio_config.get('voice_id', ''),
-            speed=self.audio_config.get('voice_speed', 1.2),
-            volume=self.audio_config.get('voice_volume', 1.0)
-        )
-        
-        return await self.audio_generator.generate_audio_async(request)
     
     async def _generate_character_images(self, characters: List[Character], 
                                        language: str) -> Dict[str, GeneratedImage]:
-        """生成角色图像"""
+        """生成角色图像 - 使用受控并发"""
         self.logger.info(f"Generating images for {len(characters)} characters...")
         
         character_images = {}
         
-        # 并行生成角色图像
-        tasks = []
+        # 准备角色图像请求
+        image_requests = []
+        character_names = []
+        
         for character in characters:
             if character.image_prompt:  # 只为有提示词的角色生成图像
-                task = self._generate_character_image(character, language)
-                tasks.append((character.name, task))
+                request = ImageGenerationRequest(
+                    prompt=character.image_prompt,
+                    style="ancient_horror"
+                )
+                image_requests.append(request)
+                character_names.append(character.name)
         
-        if not tasks:
+        if not image_requests:
             return character_images
         
-        results = await asyncio.gather(*[task[1] for task in tasks], return_exceptions=True)
+        # 使用批量生成方法（单个并发，避免角色图像竞争）
+        generated_images = await self.image_generator.batch_generate_images(
+            image_requests, max_concurrent=1
+        )
         
-        for (char_name, _), result in zip(tasks, results):
-            if isinstance(result, Exception):
-                self.logger.error(f"Character image generation failed for {char_name}: {result}")
+        # 组合结果
+        for i, char_name in enumerate(character_names):
+            if i < len(generated_images):
+                character_images[char_name] = generated_images[i]
+                self.logger.info(f"Character image generated for {char_name}")
             else:
-                character_images[char_name] = result
+                self.logger.error(f"Character image generation failed for {char_name}")
         
         return character_images
     
-    async def _generate_character_image(self, character: Character, language: str) -> GeneratedImage:
-        """生成角色图像"""
-        request = ImageGenerationRequest(
-            prompt=character.image_prompt,
-            style="ancient_horror",
-            width=int(self.image_config.get('resolution', '1024x768').split('x')[0]),
-            height=int(self.image_config.get('resolution', '1024x768').split('x')[1]),
-            quality=self.image_config.get('quality', 'high'),
-            steps=self.image_config.get('ddim_steps', 40),
-            model_id=self.image_config.get('model_id', 8)
-        )
-        
-        return await self.image_generator.generate_image_async(request)
     
     async def _generate_title_audio(self, title: str, language: str) -> GeneratedAudio:
         """生成标题音频"""

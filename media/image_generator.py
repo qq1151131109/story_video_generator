@@ -6,6 +6,7 @@ import asyncio
 import aiohttp
 import base64
 import os
+import random
 import time
 from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
@@ -15,9 +16,9 @@ from PIL import Image
 import io
 import hashlib
 
-from ..core.config_manager import ConfigManager
-from ..core.cache_manager import CacheManager  
-from ..utils.file_manager import FileManager
+from core.config_manager import ConfigManager
+from core.cache_manager import CacheManager  
+from utils.file_manager import FileManager
 
 @dataclass
 class ImageGenerationRequest:
@@ -42,16 +43,16 @@ class GeneratedImage:
     provider: str                 # 提供商
     model: str                    # 使用的模型
     generation_time: float        # 生成耗时
+    file_path: Optional[str] = None  # 保存的文件路径
 
 class ImageGenerator:
     """
     图像生成器 - 支持多个提供商
     
     支持的提供商：
-    1. Gemini 2.5 Flash Image Preview - 主要提供商（Google最新文生图）
-    2. RunningHub - 备用提供商1（对应原工作流）
-    2. OpenAI DALL-E - 备用
-    3. Stability AI - 备用
+    1. RunningHub - 主要提供商（Flux模型，对应原工作流）
+    2. OpenAI DALL-E - 备用提供商（通过OpenRouter）
+    3. Stability AI - 备用提供商
     """
     
     def __init__(self, config_manager: ConfigManager, 
@@ -67,19 +68,14 @@ class ImageGenerator:
         
         # API密钥
         self.api_keys = {
-            'gemini': config_manager.get_api_key('openrouter'),  # Gemini通过OpenRouter访问
             'runninghub': config_manager.get_api_key('runninghub'),
-            'openai': config_manager.get_api_key('openrouter'),  # 使用OpenRouter访问OpenAI
-            'stability': config_manager.get_api_key('stability')
+            'openai': config_manager.get_api_key('openrouter')
         }
         
-        # Gemini模型配置
-        self.gemini_image_model = os.getenv('GEMINI_IMAGE_MODEL', 'google/gemini-2.5-flash-image-preview')
-        self.gemini_image_model_free = os.getenv('GEMINI_IMAGE_MODEL_FREE', 'google/gemini-2.5-flash-image-preview:free')
         
         # 提供商优先级
-        self.primary_provider = self.image_config.get('primary_provider', 'gemini')  # 默认使用Gemini
-        self.fallback_providers = self.image_config.get('fallback_providers', ['runninghub', 'openai', 'stability'])
+        self.primary_provider = self.image_config.get('primary_provider', 'runninghub')  
+        self.fallback_providers = self.image_config.get('fallback_providers', ['openai'])
         
         # 默认样式提示词
         self._load_style_prompts()
@@ -142,9 +138,7 @@ class ImageGenerator:
                 try:
                     self.logger.info(f"Generating image with {provider_name}: {request.prompt[:50]}...")
                     
-                    if provider_name == 'gemini':
-                        result = await self._generate_with_gemini(request, full_prompt)
-                    elif provider_name == 'runninghub':
+                    if provider_name == 'runninghub':
                         result = await self._generate_with_runninghub(request, full_prompt)
                     elif provider_name == 'openai':
                         result = await self._generate_with_openai(request, full_prompt)
@@ -167,14 +161,17 @@ class ImageGenerator:
                     self.cache.set('images', cache_key, cache_data)
                     
                     # 记录日志
-                    self.config.get_logger('story_generator').log_media_generation(
-                        media_type='image',
-                        provider=provider_name,
-                        processing_time=result.generation_time,
-                        file_size=result.file_size
-                    )
+                    # 保存图像文件
+                    file_path = self.save_image(result)
+                    result.file_path = file_path
+                    
+                    logger = self.config.get_logger('story_generator')
+                    logger.info(f"Media generation - Type: image, Provider: {provider_name}, "
+                               f"Processing time: {result.generation_time:.2f}s, "
+                               f"File size: {result.file_size} bytes")
                     
                     self.logger.info(f"Generated image successfully with {provider_name}: {result.file_size / 1024:.1f}KB in {result.generation_time:.2f}s")
+                    self.logger.info(f"Image saved to: {file_path}")
                     
                     return result
                     
@@ -191,12 +188,9 @@ class ImageGenerator:
             self.logger.error(f"Image generation failed after {processing_time:.2f}s: {e}")
             
             # 记录错误日志
-            self.config.get_logger('story_generator').log_media_generation(
-                media_type='image',
-                provider='unknown',
-                processing_time=processing_time,
-                success=False
-            )
+            logger = self.config.get_logger('story_generator')
+            logger.error(f"Media generation failed - Type: image, Provider: unknown, "
+                        f"Processing time: {processing_time:.2f}s")
             
             raise
     
@@ -213,157 +207,163 @@ class ImageGenerator:
         
         return ', '.join(prompt_parts)
     
+    
     async def _generate_with_runninghub(self, request: ImageGenerationRequest, 
                                       full_prompt: str) -> GeneratedImage:
         """
-        使用RunningHub生成图像
+        使用RunningHub ComfyUI API生成图像
         
-        对应原工作流的图像生成配置
+        基于用户提供的工作流配置
         """
         start_time = time.time()
         
-        # RunningHub API配置
-        api_url = "https://api.runninghub.ai/v1/images/generations"
+        # 使用通用工作流创建API而不是快捷创作API
+        api_url = "https://www.runninghub.cn/task/openapi/create"
         
+        # 使用Flux工作流ID（已验证可工作）
+        workflow_id = "1958005140101935106"
+        
+        # 构建节点参数
         payload = {
-            "prompt": full_prompt,
-            "negative_prompt": request.negative_prompt,
-            "model_id": request.model_id or self.image_config.get('model_id', 8),
-            "width": request.width,
-            "height": request.height,
-            "steps": request.steps,
-            "guidance_scale": 7.5,
-            "scheduler": "DPMSolverMultistep",
-            "quality": request.quality,
-            "response_format": "b64_json"
+            "apiKey": self.api_keys['runninghub'],
+            "workflowId": workflow_id,
+            "nodeInfoList": [
+                {
+                    "nodeId": "39",  # CLIPTextEncode节点
+                    "fieldName": "text",
+                    "fieldValue": full_prompt
+                }
+            ]
         }
         
         headers = {
-            "Authorization": f"Bearer {self.api_keys['runninghub']}",
+            "Host": "www.runninghub.cn",
             "Content-Type": "application/json"
         }
         
+        self.logger.info(f"RunningHub request: {full_prompt[:50]}...")
+        
         async with aiohttp.ClientSession() as session:
+            # 创建任务
             async with session.post(api_url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    raise Exception(f"RunningHub API error {response.status}: {error_text}")
+                    raise Exception(f"RunningHub task creation failed {response.status}: {error_text}")
                 
                 result = await response.json()
                 
-                if 'data' not in result or not result['data']:
-                    raise Exception("No image data in RunningHub response")
+                # 根据API文档，成功时code为0
+                if result.get('code') != 0:
+                    error_msg = result.get('msg', 'Task creation failed')
+                    raise Exception(f"RunningHub task failed: {error_msg}")
                 
-                # 解码图像数据
-                image_b64 = result['data'][0]['b64_json']
-                image_data = base64.b64decode(image_b64)
+                # 根据API文档，taskId在data对象中，是整数类型
+                task_id = result.get('data', {}).get('taskId')
+                if not task_id:
+                    raise Exception("No task ID returned from RunningHub")
                 
-                return GeneratedImage(
-                    image_data=image_data,
-                    prompt=full_prompt,
-                    width=request.width,
-                    height=request.height,
-                    file_size=len(image_data),
-                    provider='runninghub',
-                    model=f"model_{request.model_id}",
-                    generation_time=time.time() - start_time
-                )
-    
-    async def _generate_with_gemini(self, request: ImageGenerationRequest, 
-                                  full_prompt: str) -> GeneratedImage:
-        """使用Gemini 2.5 Flash Image Preview生成图像"""
-        start_time = time.time()
-        
-        # OpenRouter API配置
-        api_url = f"{os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')}/chat/completions"
-        
-        # 根据质量选择模型（免费版或付费版）
-        model = self.gemini_image_model_free if request.quality == "standard" else self.gemini_image_model
-        
-        # 构建消息 - Gemini的图像生成是通过chat completions接口
-        messages = [
-            {
-                "role": "user", 
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Generate an image with the following description: {full_prompt}. Style: {request.style}. Make it {request.width}x{request.height} pixels, {request.quality} quality."
-                    }
-                ]
-            }
-        ]
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "max_tokens": 4096,
-            "temperature": 0.8,
-            "extra": {
-                "image_generation": True,
-                "image_size": f"{request.width}x{request.height}",
-                "image_quality": request.quality
-            }
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_keys['gemini']}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/qq1151131109/story_video_generator",
-            "X-Title": "Historical Story Generator"
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(api_url, json=payload, headers=headers, timeout=120) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"Gemini API error {response.status}: {error_text}")
+                self.logger.info(f"RunningHub quick-ai-app task created: {task_id}")
                 
-                result = await response.json()
+                # 轮询任务状态直到完成
+                status_url = "https://www.runninghub.cn/task/openapi/status"
+                status_payload = {"taskId": task_id, "apiKey": self.api_keys['runninghub']}
                 
-                if 'choices' not in result or not result['choices']:
-                    raise Exception("No choices in Gemini response")
-                
-                choice = result['choices'][0]
-                
-                # Gemini可能返回图像URL或base64数据
-                image_data = None
-                if 'message' in choice and 'content' in choice['message']:
-                    content = choice['message']['content']
+                # 等待任务完成（最多等待120秒）
+                for attempt in range(120):
+                    await asyncio.sleep(1)
                     
-                    # 检查是否包含图像数据
-                    if isinstance(content, str) and 'data:image' in content:
-                        # 提取base64数据
-                        base64_part = content.split('data:image/')[1].split(';base64,')[1]
-                        image_data = base64.b64decode(base64_part)
-                    elif isinstance(content, list):
-                        for item in content:
-                            if item.get('type') == 'image_url' and 'url' in item:
-                                # 下载图像
-                                async with session.get(item['url']) as img_response:
-                                    if img_response.status == 200:
-                                        image_data = await img_response.read()
-                                        break
+                    try:
+                        async with session.post(status_url, json=status_payload, headers=headers) as status_response:
+                            if status_response.status == 200:
+                                status_result = await status_response.json()
+                                
+                                if status_result.get('code') == 0:
+                                    task_status = status_result.get('data')
+                                    
+                                    if task_status == 'SUCCESS':
+                                        self.logger.info(f"RunningHub task {task_id} completed successfully")
+                                        
+                                        # 获取真实的生成结果
+                                        outputs_url = "https://www.runninghub.cn/task/openapi/outputs"
+                                        outputs_payload = {"taskId": task_id, "apiKey": self.api_keys['runninghub']}
+                                        
+                                        try:
+                                            async with session.post(outputs_url, json=outputs_payload, headers=headers) as outputs_response:
+                                                if outputs_response.status == 200:
+                                                    outputs_result = await outputs_response.json()
+                                                    if outputs_result.get('code') == 0:
+                                                        outputs = outputs_result.get('data', [])
+                                                        
+                                                        # 寻找图像URL
+                                                        for item in outputs:
+                                                            if isinstance(item, dict) and 'fileUrl' in item:
+                                                                image_url = item['fileUrl']
+                                                                self.logger.info(f"Found image URL: {image_url}")
+                                                                
+                                                                # 下载真实图像
+                                                                async with session.get(image_url) as img_response:
+                                                                    if img_response.status == 200:
+                                                                        image_data = await img_response.read()
+                                                                        
+                                                                        return GeneratedImage(
+                                                                            image_data=image_data,
+                                                                            prompt=full_prompt,
+                                                                            width=request.width,
+                                                                            height=request.height,
+                                                                            file_size=len(image_data),
+                                                                            provider='runninghub',
+                                                                            model=f"flux_task_{task_id}",
+                                                                            generation_time=time.time() - start_time
+                                                                        )
+                                                            elif isinstance(item, str) and item.startswith('http'):
+                                                                # 处理字符串格式的URL
+                                                                async with session.get(item) as img_response:
+                                                                    if img_response.status == 200:
+                                                                        image_data = await img_response.read()
+                                                                        
+                                                                        return GeneratedImage(
+                                                                            image_data=image_data,
+                                                                            prompt=full_prompt,
+                                                                            width=request.width,
+                                                                            height=request.height,
+                                                                            file_size=len(image_data),
+                                                                            provider='runninghub',
+                                                                            model=f"flux_task_{task_id}",
+                                                                            generation_time=time.time() - start_time
+                                                                        )
+                                                        
+                                                        # 如果没有找到图像URL，记录警告
+                                                        self.logger.warning(f"No image URL found in outputs: {outputs}")
+                                        except Exception as e:
+                                            self.logger.error(f"Failed to get real results for task {task_id}: {e}")
+                                        
+                                        # 如果获取结果失败，抛出异常
+                                        raise Exception(f"Failed to get image results for RunningHub task {task_id}")
+                                    
+                                    elif task_status == 'FAILED':
+                                        raise Exception(f"RunningHub task {task_id} failed")
+                                    
+                                    elif task_status == 'RUNNING' and attempt % 10 == 0:
+                                        self.logger.debug(f"RunningHub task {task_id} still running... (attempt {attempt})")
+                    
+                    except Exception as e:
+                        if attempt > 60:  # 60秒后开始记录错误
+                            self.logger.debug(f"Status check error (attempt {attempt}): {e}")
+                        continue
                 
-                if not image_data:
-                    raise Exception("No image data found in Gemini response")
-                
-                return GeneratedImage(
-                    image_data=image_data,
-                    prompt=full_prompt,
-                    width=request.width,
-                    height=request.height,
-                    file_size=len(image_data),
-                    provider='gemini',
-                    model=model,
-                    generation_time=time.time() - start_time
-                )
+                # 超时处理
+                self.logger.warning(f"RunningHub task {task_id} polling timeout after 120 seconds")
+                raise Exception(f"RunningHub task {task_id} timeout")
+    
+    
+    
 
     async def _generate_with_openai(self, request: ImageGenerationRequest, 
                                   full_prompt: str) -> GeneratedImage:
-        """使用OpenAI DALL-E生成图像"""
+        """使用OpenAI DALL-E生成图像（通过OpenRouter）"""
         start_time = time.time()
         
-        # OpenAI DALL-E API配置
+        # 通过OpenRouter调用DALL-E 3
         api_url = f"{self.config.get_llm_config('script_generation').api_base}/images/generations"
         
         # DALL-E支持的尺寸
@@ -376,9 +376,12 @@ class ImageGenerator:
         # 选择最接近的支持尺寸
         size = dalle_sizes.get((request.width, request.height), "1024x1024")
         
+        # 限制提示词长度（DALL-E限制）
+        prompt = full_prompt[:4000] if len(full_prompt) > 4000 else full_prompt
+        
         payload = {
-            "prompt": full_prompt,
-            "model": "dall-e-3",
+            "prompt": prompt,
+            "model": "openai/dall-e-3",  # OpenRouter中的模型名称
             "size": size,
             "quality": "hd" if request.quality == "high" else "standard",
             "response_format": "b64_json",
@@ -387,11 +390,13 @@ class ImageGenerator:
         
         headers = {
             "Authorization": f"Bearer {self.api_keys['openai']}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/qq1151131109/story_video_generator",
+            "X-Title": "Historical Story Generator"
         }
         
         async with aiohttp.ClientSession() as session:
-            async with session.post(api_url, json=payload, headers=headers) as response:
+            async with session.post(api_url, json=payload, headers=headers, timeout=120) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     raise Exception(f"OpenAI API error {response.status}: {error_text}")
@@ -412,7 +417,7 @@ class ImageGenerator:
                     height=request.height,
                     file_size=len(image_data),
                     provider='openai',
-                    model='dall-e-3',
+                    model='openai/dall-e-3',
                     generation_time=time.time() - start_time
                 )
     

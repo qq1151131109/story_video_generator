@@ -217,6 +217,7 @@ class ConfigManager:
         # 从环境变量或配置文件加载API密钥
         self.api_keys = {
             'openrouter': os.getenv('OPENROUTER_API_KEY', ''),
+            'minimax': os.getenv('MINIMAX_API_KEY', ''),
             'runninghub': os.getenv('RUNNINGHUB_API_KEY', ''),
             'azure': os.getenv('AZURE_API_KEY', ''),
             'elevenlabs': os.getenv('ELEVENLABS_API_KEY', ''),
@@ -259,10 +260,17 @@ class ConfigManager:
             raise ValueError(f"LLM config not found for task type: {task_type}")
         
         # 处理环境变量替换
-        api_base = config.get('api_base', '').replace('${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}', 
-                                                     os.getenv('OPENROUTER_API_BASE', 'https://openrouter.ai/api/v1'))
-        api_key = config.get('api_key', '').replace('${OPENROUTER_API_KEY}', 
-                                                   os.getenv('OPENROUTER_API_KEY', ''))
+        api_base_raw = config.get('api_base', '')
+        if '${' in api_base_raw:
+            api_base = os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')
+        else:
+            api_base = api_base_raw
+            
+        api_key_raw = config.get('api_key', '')
+        if '${' in api_key_raw:
+            api_key = os.getenv('OPENROUTER_API_KEY', '')
+        else:
+            api_key = api_key_raw
         
         return ModelConfig(
             name=config.get('model'),
@@ -329,6 +337,10 @@ class ConfigManager:
     def get_api_key(self, service: str) -> str:
         """获取API密钥"""
         return self.api_keys.get(service, '')
+    
+    def get_logger(self, logger_name: str):
+        """获取logger实例 - 兼容性方法"""
+        return logging.getLogger(logger_name)
     
     def validate_config(self) -> List[str]:
         """验证配置完整性"""

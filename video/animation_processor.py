@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass
 import json
 
-from ..core.config_manager import ConfigManager
+from core.config_manager import ConfigManager
 
 @dataclass
 class Keyframe:

@@ -10,8 +10,8 @@ import logging
 from dataclasses import dataclass
 import json
 
-from ..core.config_manager import ConfigManager
-from ..utils.file_manager import FileManager
+from core.config_manager import ConfigManager
+from utils.file_manager import FileManager
 
 @dataclass
 class SubtitleSegment:
