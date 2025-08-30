@@ -115,12 +115,12 @@ class SceneSplitter:
 ### 技能1：场景分割
 1. 将输入的历史故事文案分割为8个独立场景
 2. 每个场景应该包含完整的故事片段，时长约3秒
-3. 为每个场景生成详细的图像描述提示词，必须包含具体的人物、服装、环境、动作等细节
+3. 为每个场景生成详细的英文图像描述提示词，必须包含具体的人物、服装、环境、动作等细节
 4. 确保场景之间的连贯性和逻辑性
 5. 生成适合的字幕文本
 
 ## 输出格式
-请严格按照以下JSON格式输出：
+请严格按照以下JSON格式输出，**注意image_prompt必须用英文生成**：
 
 ```json
 {
@@ -128,7 +128,7 @@ class SceneSplitter:
     {
       "sequence": 1,
       "content": "场景1的故事内容",
-      "image_prompt": "详细的图像描述，包含人物外貌、服装、环境、动作等具体细节，如：古代中国，朱元璋身穿破旧布衣，面容憔悴，在荒芜的田野中乞讨，背景是战乱后的废墟，昏暗色调，历史写实风格",
+      "image_prompt": "Ancient China, Emperor Zhu Yuanzhang wearing tattered cloth robes, gaunt and weary face, begging in desolate fields, background of post-war ruins, dim tones, historical realistic style, ancient horror atmosphere, white background, traditional clothing, high definition, high contrast, low saturation colors",
       "duration_seconds": 3.0,
       "animation_type": "轻微放大",
       "subtitle_text": "场景1的字幕文本"
@@ -137,21 +137,23 @@ class SceneSplitter:
 }
 ```
 
-## 重要提醒 - 必须遵守
-- image_prompt绝对不能使用"历史场景1"、"历史场景2"这样的通用占位符
-- image_prompt必须根据场景内容生成具体的图像描述，包含：
-  * 具体的人物外貌和动作
-  * 详细的服装和装饰
-  * 明确的环境和背景
-  * 历史时代特征
-- 示例正确格式："古代中国战国时期，秦始皇嬴政身穿黑色龙袍，面容威严，站在咸阳宫大殿中，背景是华丽的宫殿建筑，昏暗灯光，威严肃穆的氛围"
-- 示例错误格式："历史场景1"、"场景描述"、"图像提示"等
+## 重要提醒 - 图像提示词英文化要求
+- **image_prompt字段必须用英文生成**，这样AI绘图效果更好
+- 英文提示词必须根据场景内容生成具体描述，包含：
+  * Specific character appearance and actions (具体人物外貌和动作)
+  * Detailed clothing and decorations (详细服装和装饰) 
+  * Clear environment and background (明确环境和背景)
+  * Historical period characteristics (历史时代特征)
+  * Artistic style elements (艺术风格元素)
+- 统一添加样式要求：ancient horror style, white background, dim colors, twilight atmosphere, traditional clothing, rough lines, character close-up, high definition, high contrast, low saturation colors, shallow depth of field
+- 示例正确格式："Ancient China Warring States period, Emperor Qin Shi Huang wearing black dragon robe, stern and majestic expression, standing in Xianyang Palace hall, ornate palace architecture background, dim lighting, solemn atmosphere, ancient horror style, high definition"
+- 绝对不能使用："历史场景1"、"场景描述"、"图像提示"等中文占位符
 
 ## 限制
 1. 必须输出恰好8个场景
 2. 每个场景时长固定为3秒
-3. 图像描述要详细且符合历史背景，包含具体细节
-4. 字幕文本要简洁明了
+3. 图像描述要详细且符合历史背景，用英文表达包含具体细节
+4. 字幕文本保持中文，简洁明了
 
 现在请分割以下历史故事文案：
 
@@ -164,12 +166,12 @@ You are a professional video storyboard artist responsible for splitting histori
 ### Skill 1: Scene Splitting
 1. Split the input historical story script into 8 independent scenes
 2. Each scene should contain a complete story segment, lasting about 3 seconds
-3. Generate detailed image description prompts for each scene, including specific details about characters, clothing, environment, and actions
+3. Generate detailed English image description prompts for each scene, including specific details about characters, clothing, environment, and actions
 4. Ensure coherence and logic between scenes
 5. Generate suitable subtitle text
 
 ## Output Format
-Please output strictly in the following JSON format:
+Please output strictly in the following JSON format with **English image prompts**:
 
 ```json
 {
@@ -177,7 +179,7 @@ Please output strictly in the following JSON format:
     {
       "sequence": 1,
       "content": "Story content for scene 1",
-      "image_prompt": "Detailed image description with specific details about characters, clothing, environment, actions, e.g.: Ancient China, Zhu Yuanzhang wearing tattered cloth robes, gaunt face, begging in barren fields, background of post-war ruins, dim tones, historical realistic style", 
+      "image_prompt": "Ancient China, Emperor Zhu Yuanzhang wearing tattered cloth robes, gaunt and weary face, begging in desolate fields, background of post-war ruins, dim tones, historical realistic style, ancient horror atmosphere, white background, traditional clothing, high definition, high contrast, low saturation colors", 
       "duration_seconds": 3.0,
       "animation_type": "slight zoom",
       "subtitle_text": "Subtitle text for scene 1"
@@ -186,15 +188,22 @@ Please output strictly in the following JSON format:
 }
 ```
 
-## Important Notes
-- image_prompt must be detailed descriptions with specific details about characters, clothing, environment, actions
-- Do not use generic placeholders like "Historical Scene 1", "Scene Description"
-- Each scene's image_prompt should be unique and specific
+## Important Notes - English Image Prompt Requirements
+- **image_prompt must be in English** for optimal AI image generation results
+- English prompts must include specific scene-based descriptions with:
+  * Specific character appearance and actions
+  * Detailed clothing and decorations
+  * Clear environment and background
+  * Historical period characteristics
+  * Artistic style elements
+- Always include style requirements: ancient horror style, white background, dim colors, twilight atmosphere, traditional clothing, rough lines, character close-up, high definition, high contrast, low saturation colors, shallow depth of field
+- Example format: "Ancient China Warring States period, Emperor Qin Shi Huang wearing black dragon robe, stern and majestic expression, standing in Xianyang Palace hall, ornate palace architecture background, dim lighting, solemn atmosphere, ancient horror style, high definition"
+- Never use generic placeholders like "Historical Scene 1", "Scene Description"
 
 ## Constraints
 1. Must output exactly 8 scenes
 2. Each scene duration is fixed at 3 seconds
-3. Image descriptions should be detailed and historically accurate with specific details
+3. Image descriptions must be detailed, historically accurate, and in English
 4. Subtitle text should be concise and clear
 
 Now please split the following historical story script:
@@ -208,12 +217,12 @@ Eres un artista profesional de storyboard de video responsable de dividir guione
 ### Habilidad 1: División de Escenas
 1. Dividir el guión de historia histórica de entrada en 8 escenas independientes
 2. Cada escena debe contener un segmento completo de la historia, que dure unos 3 segundos
-3. Generar indicaciones de descripción de imagen apropiadas para cada escena
+3. Generar indicaciones detalladas en inglés para descripción de imagen para cada escena
 4. Asegurar coherencia y lógica entre escenas
 5. Generar texto de subtítulos adecuado
 
 ## Formato de Salida
-Por favor, genera estrictamente en el siguiente formato JSON:
+Por favor, genera estrictamente en el siguiente formato JSON con **indicaciones de imagen en inglés**:
 
 ```json
 {
@@ -221,7 +230,7 @@ Por favor, genera estrictamente en el siguiente formato JSON:
     {
       "sequence": 1,
       "content": "Contenido de la historia para la escena 1",
-      "image_prompt": "Descripción de imagen para la escena 1",
+      "image_prompt": "Ancient China, Emperor Zhu Yuanzhang wearing tattered cloth robes, gaunt and weary face, begging in desolate fields, background of post-war ruins, dim tones, historical realistic style, ancient horror atmosphere, white background, traditional clothing, high definition, high contrast, low saturation colors",
       "duration_seconds": 3.0,
       "animation_type": "zoom ligero", 
       "subtitle_text": "Texto de subtítulo para la escena 1"
@@ -230,10 +239,22 @@ Por favor, genera estrictamente en el siguiente formato JSON:
 }
 ```
 
+## Notas Importantes - Requisitos de Indicaciones de Imagen en Inglés
+- **image_prompt debe estar en inglés** para obtener mejores resultados de generación de imágenes AI
+- Las indicaciones en inglés deben incluir descripciones específicas basadas en la escena con:
+  * Apariencia específica del personaje y acciones
+  * Ropa detallada y decoraciones
+  * Entorno claro y fondo
+  * Características del período histórico
+  * Elementos de estilo artístico
+- Incluir siempre requisitos de estilo: ancient horror style, white background, dim colors, twilight atmosphere, traditional clothing, rough lines, character close-up, high definition, high contrast, low saturation colors, shallow depth of field
+- Formato de ejemplo: "Ancient China Warring States period, Emperor Qin Shi Huang wearing black dragon robe, stern and majestic expression, standing in Xianyang Palace hall, ornate palace architecture background, dim lighting, solemn atmosphere, ancient horror style, high definition"
+- Nunca usar marcadores genéricos como "Historical Scene 1", "Scene Description"
+
 ## Restricciones
 1. Debe generar exactamente 8 escenas
 2. La duración de cada escena es fija en 3 segundos
-3. Las descripciones de imagen deben ser detalladas e históricamente precisas
+3. Las descripciones de imagen deben ser detalladas, históricamente precisas, y en inglés
 4. El texto del subtítulo debe ser conciso y claro
 
 Ahora por favor divide el siguiente guión de historia histórica:
@@ -430,25 +451,36 @@ Ahora por favor divide el siguiente guión de historia histórica:
     
     def _extract_json_from_response(self, response: str) -> Optional[str]:
         """从响应中提取JSON内容"""
-        # 查找JSON代码块
         import re
         
-        # 查找```json...```格式
-        json_match = re.search(r'```json\s*\n(.*?)\n```', response, re.DOTALL | re.IGNORECASE)
+        # 查找```json...```格式（修复正则表达式）
+        json_match = re.search(r'```json\s*\n?(.*?)\n?```', response, re.DOTALL | re.IGNORECASE)
         if json_match:
             return json_match.group(1).strip()
         
         # 查找```...```格式（可能没有标明json）
-        code_match = re.search(r'```\s*\n(.*?)\n```', response, re.DOTALL)
+        code_match = re.search(r'```\s*\n?(.*?)\n?```', response, re.DOTALL)
         if code_match:
             content = code_match.group(1).strip()
             if content.startswith('{') and content.endswith('}'):
                 return content
         
-        # 查找直接的JSON对象
-        json_obj_match = re.search(r'\{.*\}', response, re.DOTALL)
+        # 查找直接的JSON对象（更精确的匹配）
+        json_obj_match = re.search(r'(\{[^{}]*"scenes"[^{}]*\[.*?\][^{}]*\})', response, re.DOTALL)
         if json_obj_match:
-            return json_obj_match.group(0)
+            return json_obj_match.group(1)
+        
+        # 最后尝试简单的大括号匹配
+        start_pos = response.find('{')
+        if start_pos != -1:
+            bracket_count = 0
+            for i, char in enumerate(response[start_pos:], start_pos):
+                if char == '{':
+                    bracket_count += 1
+                elif char == '}':
+                    bracket_count -= 1
+                    if bracket_count == 0:
+                        return response[start_pos:i+1]
         
         return None
     
@@ -560,23 +592,55 @@ Ahora por favor divide el siguiente guión de historia histórica:
             if obj in content:
                 keywords['objects'].append(obj)
         
-        # 根据关键词组合生成描述
+        # 创建中文到英文的人物映射
+        character_mapping = {
+            '秦始皇': 'Emperor Qin Shi Huang',
+            '嬴政': 'Emperor Qin Shi Huang',
+            '朱元璋': 'Emperor Zhu Yuanzhang',
+            '汉武帝': 'Emperor Wu of Han',
+            '唐太宗': 'Emperor Taizong of Tang',
+            '康熙': 'Emperor Kangxi',
+            '乾隆': 'Emperor Qianlong',
+            '武则天': 'Empress Wu Zetian',
+            '李世民': 'Emperor Taizong Li Shimin',
+            '刘邦': 'Emperor Liu Bang',
+            '项羽': 'Xiang Yu'
+        }
+        
+        # 创建中文到英文的地点映射
+        place_mapping = {
+            '咸阳': 'Xianyang',
+            '长安': "Chang'an",
+            '北京': 'Beijing',
+            '南京': 'Nanjing',
+            '洛阳': 'Luoyang',
+            '汴梁': 'Bianliang',
+            '宫殿': 'imperial palace',
+            '皇宫': 'royal palace',
+            '城墙': 'city walls',
+            '战场': 'battlefield',
+            '朝堂': 'imperial court'
+        }
+        
+        # 根据关键词组合生成英文描述
         if keywords['characters']:
-            character = keywords['characters'][0]
+            character_cn = keywords['characters'][0]
+            character_en = character_mapping.get(character_cn, 'ancient Chinese emperor')
             if keywords['places']:
-                place = keywords['places'][0]
-                return f"古代中国，{character}在{place}，身穿古代帝王服饰，威严庄重，历史写实风格，高清画质，昏暗色调，庄严肃穆的氛围"
+                place_cn = keywords['places'][0]
+                place_en = place_mapping.get(place_cn, 'ancient Chinese location')
+                return f"Ancient China, {character_en} in {place_en}, wearing traditional imperial robes, stern and majestic expression, historical realistic style, ancient horror atmosphere, white background, dim colors, traditional clothing, high definition, high contrast, low saturation colors"
             else:
-                return f"古代中国，{character}身穿龙袍，面容威严，古代宫殿背景，历史写实风格，高清画质，威严庄重的氛围"
+                return f"Ancient China, {character_en} wearing black dragon robe, stern and majestic face, ancient imperial palace background, historical realistic style, ancient horror atmosphere, white background, traditional clothing, high definition, high contrast"
         elif keywords['places']:
-            place = keywords['places'][0]
-            return f"古代中国{place}，宏伟建筑，古代建筑风格，昏暗灯光，历史氛围浓厚，高清画质，庄严肃穆"
+            place_cn = keywords['places'][0]
+            place_en = place_mapping.get(place_cn, 'ancient Chinese architecture')
+            return f"Ancient China {place_en}, magnificent architecture, ancient architectural style, dim lighting, rich historical atmosphere, ancient horror style, white background, traditional elements, high definition, solemn atmosphere"
         elif keywords['actions']:
-            action = keywords['actions'][0]
-            return f"古代中国历史场景，{action}主题，古代服饰，传统建筑背景，历史写实风格，高清画质，威严肃穆的氛围"
+            return f"Ancient China historical scene, traditional costumes, ancient architectural background, historical realistic style, ancient horror atmosphere, white background, dim colors, traditional clothing, high definition, solemn atmosphere"
         else:
-            # 最后的通用描述
-            return f"古代中国历史场景，传统服装，古代建筑，昏暗色调，历史写实风格，高清画质，庄严肃穆的氛围"
+            # 最后的通用英文描述
+            return f"Ancient China historical scene, traditional clothing, ancient architecture, dim tones, historical realistic style, ancient horror atmosphere, white background, traditional elements, high definition, high contrast, low saturation colors, solemn atmosphere"
     
     def _scene_to_dict(self, scene: Scene) -> Dict[str, Any]:
         """将Scene对象转换为字典"""
