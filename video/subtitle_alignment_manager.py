@@ -198,6 +198,9 @@ class SubtitleAlignmentManager:
         try:
             self.logger.info("Using TTS timestamps with intelligent splitting...")
             
+            # 获取音频实际时长
+            actual_audio_duration = self._get_audio_duration(request.audio_file)
+            
             subtitle_segments = []
             for audio_sub in request.tts_subtitles:
                 # 检查文本长度，进行智能分割
@@ -221,9 +224,14 @@ class SubtitleAlignmentManager:
                             else:
                                 seg_duration = total_duration / len(text_segments)
                             
-                            # 最后一段精确对齐
+                            # 最后一段精确对齐到音频实际结束时间
                             if i == len(text_segments) - 1:
-                                end_time = audio_sub.end_time
+                                # 检查这是否是整个音频的最后一段
+                                is_final_subtitle = (audio_sub == request.tts_subtitles[-1])
+                                if is_final_subtitle and actual_audio_duration:
+                                    end_time = actual_audio_duration
+                                else:
+                                    end_time = audio_sub.end_time
                             else:
                                 end_time = current_time + seg_duration
                             
@@ -246,11 +254,18 @@ class SubtitleAlignmentManager:
                         subtitle_segments.append(subtitle_segment)
                 else:
                     # 文本长度合适，直接使用
+                    # 检查是否是最后一段，需要对齐到音频结束时间
+                    is_final_subtitle = (audio_sub == request.tts_subtitles[-1])
+                    if is_final_subtitle and actual_audio_duration:
+                        end_time = actual_audio_duration
+                    else:
+                        end_time = audio_sub.end_time
+                    
                     subtitle_segment = SubtitleSegment(
                         text=audio_sub.text,
                         start_time=audio_sub.start_time,
-                        end_time=audio_sub.end_time,
-                        duration=audio_sub.duration
+                        end_time=end_time,
+                        duration=end_time - audio_sub.start_time
                     )
                     subtitle_segments.append(subtitle_segment)
             
@@ -371,6 +386,23 @@ class SubtitleAlignmentManager:
             'chars_per_second': total_chars / result.total_duration if result.total_duration > 0 else 0,
             'confidence_score': result.confidence_score
         }
+    
+    def _get_audio_duration(self, audio_file: str) -> Optional[float]:
+        """获取音频文件的实际时长"""
+        try:
+            import subprocess
+            result = subprocess.run([
+                'ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+                '-of', 'csv=p=0', audio_file
+            ], capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                duration = float(result.stdout.strip())
+                return duration
+        except Exception as e:
+            self.logger.warning(f"Could not get audio duration for {audio_file}: {e}")
+        
+        return None
     
     def cleanup(self):
         """清理资源"""
