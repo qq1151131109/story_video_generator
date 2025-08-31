@@ -428,7 +428,7 @@ pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 ## 📈 最新更新
 
-### v2.0 重大优化 (2024年8月)
+### v2.0 重大优化
 - ✅ **服务化架构**: 引入`StoryVideoService`，提供清晰的API接口
 - ✅ **质量保证**: 移除fallback机制，确保输出质量
 - ✅ **WhisperX集成**: Word-level精确字幕对齐，大幅提升字幕质量
