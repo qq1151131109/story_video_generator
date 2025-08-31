@@ -74,8 +74,6 @@ class SubtitleAlignmentManager:
         return {
             # 对齐方法优先级
             'prefer_whisperx': whisperx_config.get('enabled', False) and WHISPERX_AVAILABLE,
-            'enable_tts_fallback': True,
-            'enable_estimate_fallback': True,
             
             # 字幕分割参数
             'max_chars_per_line': subtitle_config.get('max_line_length', 12),
@@ -101,26 +99,14 @@ class SubtitleAlignmentManager:
         """
         self.logger.info(f"Starting subtitle alignment for audio: {request.audio_file}")
         
-        # 方法1: WhisperX精确对齐
+        # 只使用WhisperX精确对齐
         if self.alignment_config['prefer_whisperx']:
             result = self._try_whisperx_alignment(request)
             if result:
                 return result
         
-        # 方法2: TTS时间戳 + 智能分割
-        if self.alignment_config['enable_tts_fallback'] and request.tts_subtitles:
-            result = self._try_tts_alignment(request)
-            if result:
-                return result
-        
-        # 方法3: 基于文本长度的估计对齐
-        if self.alignment_config['enable_estimate_fallback']:
-            result = self._try_estimate_alignment(request)
-            if result:
-                return result
-        
-        # 所有方法都失败
-        raise Exception("All subtitle alignment methods failed")
+        # 如果没有WhisperX或WhisperX失败，直接抛出异常
+        raise Exception("WhisperX alignment failed or not available. No fallback methods provided.")
     
     def _try_whisperx_alignment(self, request: AlignmentRequest) -> Optional[AlignmentResult]:
         """尝试WhisperX对齐"""
@@ -193,164 +179,9 @@ class SubtitleAlignmentManager:
             self.logger.error(f"WhisperX alignment failed: {e}")
             return None
     
-    def _try_tts_alignment(self, request: AlignmentRequest) -> Optional[AlignmentResult]:
-        """尝试TTS时间戳对齐"""
-        try:
-            self.logger.info("Using TTS timestamps with intelligent splitting...")
-            
-            # 获取音频实际时长
-            actual_audio_duration = self._get_audio_duration(request.audio_file)
-            
-            subtitle_segments = []
-            for audio_sub in request.tts_subtitles:
-                # 检查文本长度，进行智能分割
-                if len(audio_sub.text) > request.max_chars_per_line:
-                    # 智能分割文本
-                    text_segments = self.subtitle_processor._split_text_intelligently(
-                        audio_sub.text, 
-                        request.language
-                    )
-                    
-                    # 重新分配时间
-                    if len(text_segments) > 1:
-                        total_duration = audio_sub.duration
-                        total_length = sum(len(seg) for seg in text_segments)
-                        current_time = audio_sub.start_time
-                        
-                        for i, text_seg in enumerate(text_segments):
-                            # 按文本长度比例分配时间
-                            if total_length > 0:
-                                seg_duration = (len(text_seg) / total_length) * total_duration
-                            else:
-                                seg_duration = total_duration / len(text_segments)
-                            
-                            # 最后一段精确对齐到音频实际结束时间
-                            if i == len(text_segments) - 1:
-                                # 检查这是否是整个音频的最后一段
-                                is_final_subtitle = (audio_sub == request.tts_subtitles[-1])
-                                if is_final_subtitle and actual_audio_duration:
-                                    end_time = actual_audio_duration
-                                else:
-                                    end_time = audio_sub.end_time
-                            else:
-                                end_time = current_time + seg_duration
-                            
-                            subtitle_segment = SubtitleSegment(
-                                text=text_seg,
-                                start_time=current_time,
-                                end_time=end_time,
-                                duration=end_time - current_time
-                            )
-                            subtitle_segments.append(subtitle_segment)
-                            current_time = end_time
-                    else:
-                        # 单个分割结果
-                        subtitle_segment = SubtitleSegment(
-                            text=text_segments[0],
-                            start_time=audio_sub.start_time,
-                            end_time=audio_sub.end_time,
-                            duration=audio_sub.duration
-                        )
-                        subtitle_segments.append(subtitle_segment)
-                else:
-                    # 文本长度合适，直接使用
-                    # 检查是否是最后一段，需要对齐到音频结束时间
-                    is_final_subtitle = (audio_sub == request.tts_subtitles[-1])
-                    if is_final_subtitle and actual_audio_duration:
-                        end_time = actual_audio_duration
-                    else:
-                        end_time = audio_sub.end_time
-                    
-                    subtitle_segment = SubtitleSegment(
-                        text=audio_sub.text,
-                        start_time=audio_sub.start_time,
-                        end_time=end_time,
-                        duration=end_time - audio_sub.start_time
-                    )
-                    subtitle_segments.append(subtitle_segment)
-            
-            result = AlignmentResult(
-                subtitles=subtitle_segments,
-                method='TTS + Intelligent Splitting',
-                total_segments=len(subtitle_segments),
-                total_duration=subtitle_segments[-1].end_time if subtitle_segments else 0.0,
-                confidence_score=0.7  # TTS时间戳置信度中等
-            )
-            
-            self.logger.info(f"TTS alignment successful: {len(subtitle_segments)} segments")
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"TTS alignment failed: {e}")
-            return None
+
     
-    def _try_estimate_alignment(self, request: AlignmentRequest) -> Optional[AlignmentResult]:
-        """尝试基于文本长度的估计对齐"""
-        try:
-            self.logger.info("Using text-length-based estimation alignment...")
-            
-            # 获取音频时长
-            if os.path.exists(request.audio_file):
-                try:
-                    import torchaudio
-                    waveform, sample_rate = torchaudio.load(request.audio_file)
-                    total_duration = waveform.shape[1] / sample_rate
-                except:
-                    # 如果torchaudio不可用，使用默认时长
-                    total_duration = 60.0
-                    self.logger.warning("Could not determine audio duration, using default 60s")
-            else:
-                total_duration = 60.0
-            
-            # 智能分割文本
-            text_segments = self.subtitle_processor._split_text_intelligently(
-                request.script_text,
-                request.language
-            )
-            
-            # 基于文本长度分配时间
-            subtitle_segments = []
-            total_chars = sum(len(seg) for seg in text_segments)
-            current_time = 0.0
-            
-            for i, text_seg in enumerate(text_segments):
-                if total_chars > 0:
-                    segment_duration = (len(text_seg) / total_chars) * total_duration
-                else:
-                    segment_duration = total_duration / len(text_segments)
-                
-                # 限制最大时长
-                segment_duration = min(segment_duration, request.max_duration_per_subtitle)
-                
-                # 最后一段对齐到总时长
-                if i == len(text_segments) - 1:
-                    end_time = total_duration
-                else:
-                    end_time = current_time + segment_duration
-                
-                subtitle_segment = SubtitleSegment(
-                    text=text_seg,
-                    start_time=current_time,
-                    end_time=end_time,
-                    duration=end_time - current_time
-                )
-                subtitle_segments.append(subtitle_segment)
-                current_time = end_time
-            
-            result = AlignmentResult(
-                subtitles=subtitle_segments,
-                method='Text Length Estimation',
-                total_segments=len(subtitle_segments),
-                total_duration=total_duration,
-                confidence_score=0.5  # 估计对齐置信度较低
-            )
-            
-            self.logger.info(f"Estimation alignment successful: {len(subtitle_segments)} segments")
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"Estimation alignment failed: {e}")
-            return None
+
     
     def save_alignment_result(self, result: AlignmentResult, output_path: str) -> bool:
         """保存对齐结果为SRT文件"""

@@ -162,11 +162,16 @@ class MediaPipeline:
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         for idx, scene in enumerate(scenes, start=1):
-            # 图像请求
+            # 图像请求 - 从配置读取分辨率
             prompt = scene.image_prompt if scene.image_prompt else f"历史场景：{scene.content}"
+            media_config = self.config.get_media_config()
+            width, height = map(int, media_config.image_resolution.split('x'))
+            
             image_req = ImageGenerationRequest(
                 prompt=prompt,
                 style="ancient_horror",
+                width=width,
+                height=height,
                 scene_id=f"scene_{idx}_{timestamp}"
             )
             image_requests.append((scene, image_req))
@@ -235,9 +240,15 @@ class MediaPipeline:
         
         for character in characters:
             if character.image_prompt:  # 只为有提示词的角色生成图像
+                # 从配置读取分辨率
+                media_config = self.config.get_media_config()
+                width, height = map(int, media_config.image_resolution.split('x'))
+                
                 request = ImageGenerationRequest(
                     prompt=character.image_prompt,
-                    style="ancient_horror"
+                    style="ancient_horror",
+                    width=width,
+                    height=height
                 )
                 image_requests.append(request)
                 character_names.append(character.name)

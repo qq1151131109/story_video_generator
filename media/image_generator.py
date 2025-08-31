@@ -27,7 +27,7 @@ class ImageGenerationRequest:
     negative_prompt: str = ""      # 负面提示词
     style: str = "ancient_horror"  # 风格
     width: int = 1024             # 宽度
-    height: int = 768             # 高度
+    height: int = 1024            # 高度（修改为1024x1024）
     quality: str = "high"         # 质量 (high, standard)
     steps: int = 40               # 采样步数
     model_id: Optional[int] = 8   # 模型ID（RunningHub）
@@ -149,8 +149,18 @@ class ImageGenerator:
                     # 缓存已禁用
                     
                     # 记录日志
-                    # 保存图像文件
-                    file_path = self.save_image(result)
+                    # 保存图像文件（避免跨任务复用/覆盖：使用场景ID+毫秒时间戳+内容指纹命名）
+                    custom_filename = None
+                    try:
+                        content_digest = hashlib.md5(result.image_data).hexdigest()[:8]
+                        millis = int(time.time() * 1000)
+                        if request.scene_id:
+                            custom_filename = f"img_{request.scene_id}_{provider_name}_{millis}_{content_digest}.png"
+                        else:
+                            custom_filename = None
+                    except Exception:
+                        custom_filename = None
+                    file_path = self.save_image(result, filename=custom_filename) if custom_filename else self.save_image(result)
                     result.file_path = file_path
                     
                     logger = self.config.get_logger('story_generator')
@@ -208,20 +218,43 @@ class ImageGenerator:
         # 使用通用工作流创建API而不是快捷创作API
         api_url = "https://www.runninghub.cn/task/openapi/create"
         
-        # 使用Flux工作流ID（已验证可工作）
-        workflow_id = "1958005140101935106"
+        # 🎯 获取RunningHub工作流配置
+        rh_config = self.image_config.get('runninghub', {})
+        workflow_id = rh_config.get('workflow_id', "1958005140101935106")  # 默认兼容旧版
+        prompt_node_id = rh_config.get('prompt_node_id', "39")  # 提示词节点ID
+        resolution_node_id = rh_config.get('resolution_node_id', "5")  # 分辨率节点ID
         
-        # 构建节点参数
+        # 构建节点参数 - 完全可配置的分辨率系统
+        node_list = [
+            {
+                "nodeId": prompt_node_id,
+                "fieldName": "text", 
+                "fieldValue": full_prompt
+            }
+        ]
+        
+        # 🔧 只有当配置了分辨率节点ID时才添加分辨率控制
+        if resolution_node_id and rh_config.get('supports_custom_resolution', False):
+            node_list.extend([
+                {
+                    "nodeId": resolution_node_id,
+                    "fieldName": "width",
+                    "fieldValue": request.width
+                },
+                {
+                    "nodeId": resolution_node_id,
+                    "fieldName": "height", 
+                    "fieldValue": request.height
+                }
+            ])
+            self.logger.info(f"Using custom resolution: {request.width}x{request.height}")
+        else:
+            self.logger.info(f"Using workflow default resolution (custom resolution not configured)")
+        
         payload = {
             "apiKey": self.api_keys['runninghub'],
             "workflowId": workflow_id,
-            "nodeInfoList": [
-                {
-                    "nodeId": "39",  # CLIPTextEncode节点
-                    "fieldName": "text",
-                    "fieldValue": full_prompt
-                }
-            ]
+            "nodeInfoList": node_list
         }
         
         headers = {
@@ -230,6 +263,7 @@ class ImageGenerator:
         }
         
         self.logger.info(f"RunningHub request: {full_prompt[:50]}...")
+        self.logger.info(f"RunningHub payload: {payload}")
         
         async with aiohttp.ClientSession() as session:
             # 创建任务

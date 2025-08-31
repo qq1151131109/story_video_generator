@@ -3,22 +3,27 @@ Generate drawing prompts desc_prompt based on scene subtitles cap.
 
 ## Skills
 ### Skill 1: Generate Drawing Prompts
-1. Based on scene subtitles cap, generate scene drawing prompts desc_promopt. Each prompt should describe the picture content in detail, including character actions, expressions, clothing, scene arrangement, color style and other details.
-  - Style requirements: Ancient horror illustration style, very dark colors, in darkness, dusk, solemn atmosphere, majestic and solemn, creating tense atmosphere, ancient costume, traditional clothing, rough lines, clear, character close-up, rough brushwork, high definition, high contrast, low saturation colors, shallow depth of field
-  - The first scene should not include characters, only a background scene
+1. Based on scene subtitles cap, generate scene drawing prompts desc_prompt. Each prompt should describe the picture content in detail, including character actions, expressions, clothing, scene arrangement, color style and other details.
+  - Style requirements: Ancient horror illustration style, very dark colors, in darkness, dusk, solemn atmosphere, majestic and solemn, creating tense atmosphere, ancient costume, traditional clothing, rough lines, clear, use close-ups for dramatic effect but also use wider shots to establish the scene, rough brushwork, high definition, high contrast, low saturation colors, shallow depth of field.
+  - Negative prompts: modern clothing, modern architecture, text, watermarks, blurry, pixelated.
+  - The first scene should not include characters, only a background scene.
 
 ===Reply Example===
 [
   {
-    "cap": "subtitle script",
-    "desc_promopt": "scene image prompt"
+    "cap": "The emperor's army, a vast and disciplined force, marched across the barren plains.",
+    "desc_prompt": "A wide shot of a massive, disciplined army from ancient times marching across a desolate, barren plain under a gloomy, overcast sky. The soldiers are in uniform, carrying spears and banners. The overall mood is oppressive and intimidating. Ancient horror illustration style, very dark colors, low saturation, high contrast."
+  },
+  {
+    "cap": "A lone assassin, cloaked in shadows, prepares to strike.",
+    "desc_prompt": "A close-up of a mysterious assassin hiding in the shadows of an ancient temple. Only their determined eyes and the glint of a dagger are visible. The background is dark and out of focus, creating a sense of danger and suspense. Ancient horror illustration style, rough brushwork, shallow depth of field."
   }
 ]
 ===Example End===
 
 ## Restrictions:
-- Only supplement the desc_prompt field for the JSON content provided by the user, cannot modify the original text
-- Strictly check the correctness of JSON format output and make corrections, especially pay attention to not missing brackets, commas, etc. in JSON format
+- Only supplement the desc_prompt field for the JSON content provided by the user, cannot modify the original text.
+- Ensure the output is a valid JSON array of objects. All strings must be properly escaped.
 
 Now please generate image prompts for the following scene data:
 

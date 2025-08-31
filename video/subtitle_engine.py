@@ -582,6 +582,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # 获取字体路径
             font_path = self._detect_chinese_font()
             
+            # 🔧 分批渲染解决大量滤镜问题
+            if len(segments) > 20:
+                self.logger.warning(f"Large subtitle count ({len(segments)}), using batch rendering")
+                return self._render_jianying_batch(video_path, segments, output_path, style)
+            
             # 构建drawtext滤镜链
             drawtext_filters = []
             
@@ -652,6 +657,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 output_path
             ]
             
+            # 添加详细调试日志
+            self.logger.info(f"FFmpeg command: {' '.join(cmd[:10])}... (total {len(cmd)} args)")
+            self.logger.info(f"Filter chain length: {len(filter_chain)} chars, {len(drawtext_filters)} drawtext filters")
+            self.logger.debug(f"Full filter chain: {filter_chain}")
+            
             result = subprocess.run(cmd, capture_output=True, text=True)
             
             if result.returncode == 0:
@@ -659,11 +669,135 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 return True
             else:
                 self.logger.error(f"Jianying rendering failed: {result.stderr}")
+                self.logger.error(f"FFmpeg stdout: {result.stdout}")
                 return False
                 
         except Exception as e:
             self.logger.error(f"Jianying rendering error: {e}")
             return False
+    
+    def _render_jianying_batch(self, video_path: str, segments: List[SubtitleSegment], 
+                              output_path: str, style: SubtitleStyle) -> bool:
+        """剪映风格分批渲染 - 解决大量字幕问题"""
+        try:
+            self.logger.info(f"Batch rendering {len(segments)} subtitles in groups of 15")
+            
+            import tempfile
+            current_video = video_path
+            batch_size = 15
+            
+            for batch_start in range(0, len(segments), batch_size):
+                batch_end = min(batch_start + batch_size, len(segments))
+                batch_segments = segments[batch_start:batch_end]
+                
+                self.logger.info(f"Processing batch {batch_start//batch_size + 1}: segments {batch_start+1}-{batch_end}")
+                
+                # 创建临时输出文件
+                if batch_end < len(segments):
+                    temp_output = tempfile.mktemp(suffix='.mp4')
+                else:
+                    temp_output = output_path
+                
+                # 获取字体路径
+                font_path = self._detect_chinese_font()
+                
+                # 为这批字幕构建滤镜
+                drawtext_filters = []
+                
+                for segment in batch_segments:
+                    lines = self._smart_text_wrap_jianying(segment.text, style)
+                    display_text = '\n'.join(lines)
+                    
+                    params = []
+                    if font_path:
+                        params.append(f"fontfile='{font_path}'")
+                    
+                    escaped_text = display_text.replace("'", "\\'").replace(":", "\\:")
+                    params.append(f"text='{escaped_text}'")
+                    params.append(f"fontsize={style.font_size}")
+                    params.append(f"fontcolor={style.font_color.replace('#', '')}")
+                    params.append(f"borderw={style.border_width}")
+                    params.append(f"bordercolor={style.border_color.replace('#', '')}")
+                    
+                    if style.background_enabled:
+                        params.append("box=1")
+                        params.append(f"boxcolor={style.background_color}")
+                        params.append("boxborderw=12")
+                    
+                    params.append("x=(w-text_w)/2")
+                    params.append(f"y=h-text_h-{style.margin_v}")
+                    
+                    # 🎯 关键：确保最后一段延伸到视频结束
+                    if segment == segments[-1]:  # 最后一段字幕
+                        # 获取视频时长并稍微延长字幕显示时间
+                        video_duration = self._get_video_duration(current_video)
+                        if video_duration and segment.end_time < video_duration:
+                            end_time = video_duration + 0.1  # 延长0.1秒确保显示
+                            self.logger.info(f"Extending final subtitle to {end_time:.3f}s (video ends at {video_duration:.3f}s)")
+                        else:
+                            end_time = segment.end_time
+                    else:
+                        end_time = segment.end_time
+                    
+                    time_expr = f"between(t,{segment.start_time:.3f},{end_time:.3f})"
+                    params.append(f"enable='{time_expr}'")
+                    
+                    if style.fade_enabled:
+                        fade_dur = style.fade_duration
+                        alpha_expr = (
+                            f"'if(lt(t,{segment.start_time:.3f}+{fade_dur}), "
+                            f"(t-{segment.start_time:.3f})/{fade_dur}, "
+                            f"if(gt(t,{end_time:.3f}-{fade_dur}), "
+                            f"({end_time:.3f}-t)/{fade_dur}, 1))'"
+                        )
+                        params.append(f"alpha={alpha_expr}")
+                    
+                    drawtext_filters.append("drawtext=" + ":".join(params))
+                
+                # 构建滤镜链
+                filter_chain = "[0:v]" + ",".join(drawtext_filters) + "[v]"
+                
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-i', current_video,
+                    '-filter_complex', filter_chain,
+                    '-map', '[v]',
+                    '-map', '0:a',
+                    '-c:a', 'copy',
+                    '-c:v', 'libx264',
+                    '-preset', 'fast',
+                    temp_output
+                ]
+                
+                self.logger.info(f"Batch {batch_start//batch_size + 1}: {len(drawtext_filters)} filters, chain length: {len(filter_chain)}")
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    self.logger.error(f"Batch {batch_start//batch_size + 1} failed: {result.stderr}")
+                    return False
+                
+                # 更新当前视频为下一批的输入
+                if batch_end < len(segments):
+                    current_video = temp_output
+            
+            self.logger.info("Batch rendering completed successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Batch rendering error: {e}")
+            return False
+    
+    def _get_video_duration(self, video_path: str) -> Optional[float]:
+        """获取视频时长"""
+        try:
+            cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', video_path]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                return float(result.stdout.strip())
+        except Exception as e:
+            self.logger.warning(f"Could not get video duration: {e}")
+        return None
     
     def _render_traditional_style(self, video_path: str, segments: List[SubtitleSegment], 
                                  output_path: str, style: SubtitleStyle) -> bool:

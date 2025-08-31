@@ -12,6 +12,7 @@ from typing import List, Optional
 from core.config_manager import ConfigManager
 from utils.file_manager import FileManager
 from video.subtitle_engine import SubtitleEngine, SubtitleRequest
+from video.enhanced_animation_processor import EnhancedAnimationProcessor, AnimationRequest
 
 
 class VideoComposer:
@@ -30,6 +31,9 @@ class VideoComposer:
         
         # 初始化统一字幕引擎
         self.subtitle_engine = SubtitleEngine(config_manager, file_manager)
+        
+        # 初始化增强动画处理器
+        self.animation_processor = EnhancedAnimationProcessor(config_manager)
         
         # 检查FFmpeg是否可用
         self._check_ffmpeg()
@@ -95,13 +99,34 @@ class VideoComposer:
                 scene_video = temp_dir / f"scene_{i+1}.mp4"
                 
                 if image and image.file_path and Path(image.file_path).exists():
-                    # 使用FFmpeg创建场景视频（图片+动画）- 根据配置分辨率
+                    # 🎬 使用增强动画处理器创建Ken Burns效果
+                    animation_request = AnimationRequest(
+                        image_path=str(image.file_path),
+                        duration_seconds=duration,
+                        animation_type="智能选择",
+                        is_character=False
+                    )
+                    
+                    # 创建Ken Burns动画
+                    animation_clip = self.animation_processor.create_scene_animation(
+                        animation_request, scene_index=i)
+                    
+                    # 生成增强版FFmpeg滤镜
+                    animation_filter = self.animation_processor.generate_enhanced_ffmpeg_filter(
+                        animation_clip, (self.width, self.height))
+                    # 防御性检查：禁止旧表达式混入
+                    if 't/' in animation_filter:
+                        self.logger.warning(f"Detected legacy time-based expression in filter; falling back to basic filter for scene {i+1}")
+                        animation_filter = f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2"
+                    
+                    self.logger.info(f"Scene {i+1}: Using {animation_clip.animation_type} animation")
+                    
+                    # 使用增强动画滤镜创建场景视频
                     cmd = [
                         'ffmpeg', '-y',
                         '-loop', '1',
                         '-i', str(image.file_path),
-                        '-filter_complex', 
-                        f'scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,zoompan=z=\'min(zoom+0.0015,1.5)\':d={int(duration*30)}:s={self.video_resolution}',
+                        '-filter_complex', animation_filter,
                         '-t', str(duration),
                         '-pix_fmt', 'yuv420p',
                         '-r', '30',

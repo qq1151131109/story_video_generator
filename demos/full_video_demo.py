@@ -34,7 +34,8 @@ from media.audio_generator import AudioGenerator, AudioGenerationRequest, Genera
 from media.character_image_generator import CharacterImageGenerator, CharacterImageRequest
 from video.subtitle_processor import SubtitleProcessor, SubtitleRequest, SubtitleSegment
 from video.title_subtitle_processor import TitleSubtitleProcessor, TitleSubtitleRequest
-from video.animation_processor import AnimationProcessor, AnimationRequest
+# 旧动画处理器已移除，演示改用增强动画处理器
+from video.enhanced_animation_processor import EnhancedAnimationProcessor, AnimationRequest
 from video.dual_image_compositor import DualImageCompositor, DualImageVideoRequest
 from video.jianying_subtitle_renderer import JianyingSubtitleRenderer
 from media.image_generator import GeneratedImage
