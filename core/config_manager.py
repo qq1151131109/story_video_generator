@@ -20,7 +20,7 @@ class ModelConfig:
 @dataclass  
 class MediaConfig:
     """媒体生成配置"""
-    image_resolution: str = "1024x768"
+    image_resolution: str = "1024x1024"
     image_quality: str = "high"
     voice_speed: float = 1.2
     voice_volume: float = 1.0
@@ -285,7 +285,7 @@ class ConfigManager:
         media_config = self.get('media', {})
         
         return MediaConfig(
-            image_resolution=media_config.get('image', {}).get('resolution', '1024x768'),
+            image_resolution=media_config.get('image', {}).get('resolution', '1024x1024'),
             image_quality=media_config.get('image', {}).get('quality', 'high'),
             voice_speed=media_config.get('audio', {}).get('voice_speed', 1.2),
             voice_volume=media_config.get('audio', {}).get('voice_volume', 1.0)

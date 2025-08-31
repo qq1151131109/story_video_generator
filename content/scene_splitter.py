@@ -122,10 +122,8 @@ class SceneSplitter:
             
         except Exception as e:
             self.logger.error(f"Failed to generate image prompts using LLM: {e}")
-            self.logger.warning("Falling back to enhanced image prompt generation...")
-            
-            # 退化到增强版的fallback方法
-            return self._ensure_valid_image_prompts(scenes, request)
+            # 不再使用fallback机制，直接抛出异常以暴露问题
+            raise Exception(f"LLM image prompt generation failed: {e}. No fallback methods provided.")
     
     def _load_prompt_templates(self):
         """加载提示词模板"""
@@ -329,33 +327,28 @@ Ahora por favor divide el siguiente guión de historia histórica:
             if request.language not in self.supported_languages:
                 raise ValueError(f"Unsupported language: {request.language}")
             
-            # 使用Coze工作流规则进行分割
-            if request.use_coze_rules:
-                scenes = self._split_by_coze_rules(request)
-                self.logger.info(f"Used Coze workflow rules: {len(scenes)} scenes generated")
-            else:
-                # 使用LLM分割（原有逻辑）
-                if request.language not in self.prompt_templates:
-                    raise ValueError(f"No prompt template for language: {request.language}")
-                
-                # 构建提示词
-                prompt_template = self.prompt_templates[request.language]
-                prompt = prompt_template.replace('{{script_content}}', request.script_content)
-                
-                # 调用LLM API
-                self.logger.info(f"Splitting scenes for {request.language} script...")
-                
-                response = await self._call_llm_api(prompt)
-                
-                if not response:
-                    raise ValueError("Empty response from LLM")
-                
-                # 解析响应
-                scenes = self._parse_scenes_response(response, request)
-                
-                # 验证场景数量
-                if len(scenes) != request.target_scene_count:
-                    self.logger.warning(f"Expected {request.target_scene_count} scenes, got {len(scenes)}")
+            # 强制使用LLM分割 - 不再使用coze_rules fallback
+            if request.language not in self.prompt_templates:
+                raise ValueError(f"No prompt template for language: {request.language}")
+            
+            # 构建提示词
+            prompt_template = self.prompt_templates[request.language]
+            prompt = prompt_template.replace('{{script_content}}', request.script_content)
+            
+            # 调用LLM API
+            self.logger.info(f"Splitting scenes for {request.language} script...")
+            
+            response = await self._call_llm_api(prompt)
+            
+            if not response:
+                raise ValueError("Empty response from LLM")
+            
+            # 解析响应
+            scenes = self._parse_scenes_response(response, request)
+            
+            # 验证场景数量
+            if len(scenes) != request.target_scene_count:
+                self.logger.warning(f"Expected {request.target_scene_count} scenes, got {len(scenes)}")
             
             # 使用专门的图像提示词生成器生成高质量提示词
             scenes = await self._generate_image_prompts_for_scenes(scenes, request)
@@ -370,7 +363,7 @@ Ahora por favor divide el siguiente guión de historia histórica:
                 language=request.language,
                 original_script=request.script_content,
                 split_time=time.time() - start_time,
-                model_used=self.llm_config.name if not request.use_coze_rules else "coze_rules"
+                model_used=self.llm_config.name
             )
             
             # 缓存结果
@@ -480,12 +473,12 @@ Ahora por favor divide el siguiente guión de historia histórica:
             
         except json.JSONDecodeError as e:
             self.logger.error(f"JSON parsing error: {e}")
-            # 尝试退化处理
-            return self._fallback_scene_parsing(response, request)
+            self.logger.error(f"Raw LLM response that caused JSON error: {response[:1000]}...")
+            raise ValueError(f"LLM returned invalid JSON format: {e}")
         except Exception as e:
             self.logger.error(f"Scene parsing error: {e}")
-            # 尝试退化处理
-            return self._fallback_scene_parsing(response, request)
+            self.logger.error(f"Raw LLM response: {response[:1000]}...")
+            raise
     
     def _extract_json_from_response(self, response: str) -> Optional[str]:
         """从响应中提取JSON内容"""
@@ -522,388 +515,390 @@ Ahora por favor divide el siguiente guión de historia histórica:
         
         return None
     
-    def _fallback_scene_parsing(self, response: str, request: SceneSplitRequest) -> List[Scene]:
+    # FALLBACK LOGIC REMOVED - 不再使用退化逻辑掩盖问题
+    # def _fallback_scene_parsing(self, response: str, request: SceneSplitRequest) -> List[Scene]:
         """
         退化的场景解析（当JSON解析失败时）
         
         Args:
-            response: LLM响应
-            request: 原始请求
-        
-        Returns:
-            List[Scene]: 解析的场景列表
-        """
-        self.logger.warning("Using fallback scene parsing")
-        
-        # 简单地将文案按句号分割
-        sentences = [s.strip() for s in request.script_content.split('。') if s.strip()]
-        
-        # 如果句子数量不够，按照目标数量进行均匀分割
-        if len(sentences) < request.target_scene_count:
-            # 按字符数分割
-            content_length = len(request.script_content)
-            segment_length = content_length // request.target_scene_count
-            
-            scenes = []
-            for i in range(request.target_scene_count):
-                start_idx = i * segment_length
-                end_idx = (i + 1) * segment_length if i < request.target_scene_count - 1 else content_length
-                
-                segment = request.script_content[start_idx:end_idx].strip()
-                
-                scene = Scene(
-                    sequence=i + 1,
-                    content=segment,
-                    image_prompt=self._generate_fallback_image_prompt(segment, i + 1),
-                    duration_seconds=request.scene_duration,
-                    animation_type="轻微放大",
-                    subtitle_text=segment[:50] + "..." if len(segment) > 50 else segment
-                )
-                
-                scenes.append(scene)
-        else:
-            # 如果句子太多，合并一些句子
-            scenes_per_sentence = len(sentences) // request.target_scene_count
-            scenes = []
-            
-            for i in range(request.target_scene_count):
-                start_idx = i * scenes_per_sentence
-                end_idx = (i + 1) * scenes_per_sentence if i < request.target_scene_count - 1 else len(sentences)
-                
-                content = '。'.join(sentences[start_idx:end_idx]) + '。'
-                
-                scene = Scene(
-                    sequence=i + 1,
-                    content=content,
-                    image_prompt=self._generate_fallback_image_prompt(content, i + 1),
-                    duration_seconds=request.scene_duration,
-                    animation_type="轻微放大",
-                    subtitle_text=content[:50] + "..." if len(content) > 50 else content
-                )
-                
-                scenes.append(scene)
-        
-        return scenes
-
-    def _ensure_valid_image_prompts(self, scenes: List[Scene], request: SceneSplitRequest) -> List[Scene]:
-        """校验并修正场景的图像提示词，确保英文、多样且不过度重复"""
-        def contains_non_ascii(s: str) -> bool:
-            try:
-                s.encode('ascii')
-                return False
-            except Exception:
-                return True
-        
-        seen_prompts = set()
-        fixed_scenes: List[Scene] = []
-        for idx, scene in enumerate(scenes, start=1):
-            prompt = scene.image_prompt or ""
-            needs_fix = False
-            if not prompt:
-                needs_fix = True
-            elif contains_non_ascii(prompt):
-                needs_fix = True
-            elif len(prompt) < 30:
-                needs_fix = True
-            elif prompt in seen_prompts:
-                needs_fix = True
-            
-            if needs_fix:
-                new_prompt = self._generate_fallback_image_prompt(scene.content, idx)
-                self.logger.debug(f"Fixing image_prompt for scene {idx}: '{prompt[:40]}' -> '{new_prompt[:60]}'")
-                prompt = new_prompt
-            
-            seen_prompts.add(prompt)
-            fixed_scenes.append(Scene(
-                sequence=scene.sequence,
-                content=scene.content,
-                image_prompt=prompt,
-                duration_seconds=scene.duration_seconds,
-                animation_type=scene.animation_type,
-                subtitle_text=scene.subtitle_text
-            ))
-        return fixed_scenes
-    
-    def _split_by_coze_rules(self, request: SceneSplitRequest, tts_subtitles: Optional[List] = None) -> List[Scene]:
-        """
-        按照原Coze工作流规则分割场景：第一句单独成段，后续每2句一段
-        
-        Args:
-            request: 场景分割请求
-            tts_subtitles: TTS返回的字幕时间戳信息（可选）
-        
-        Returns:
-            List[Scene]: 场景列表
-        """
-        # 按句号分割句子，保留句号
-        sentences = []
-        current_sentence = ""
-        
-        for char in request.script_content:
-            current_sentence += char
-            if char in ['。', '！', '？']:  # 中文句末标点(恢复原逻辑)
-                if current_sentence.strip():
-                    sentences.append(current_sentence.strip())
-                current_sentence = ""
-        
-        # 如果最后没有句末标点，添加最后一段
-        if current_sentence.strip():
-            sentences.append(current_sentence.strip())
-        
-        if not sentences:
-            # 如果没有句子，将整个文本作为一个场景
-            scenes = [Scene(
-                sequence=1,
-                content=request.script_content,
-                image_prompt=self._generate_fallback_image_prompt(request.script_content, 1),
-                duration_seconds=request.scene_duration,
-                animation_type="轻微放大",
-                subtitle_text=request.script_content[:50] + "..." if len(request.script_content) > 50 else request.script_content
-            )]
-            return scenes
-        
-        scenes = []
-        
-        # 第一句单独成段
-        if sentences:
-            first_sentence = sentences[0]
-            # 计算第一句的时长
-            duration = self._calculate_scene_duration(first_sentence, 0, 1, tts_subtitles) if tts_subtitles else request.scene_duration
-            
-            scene = Scene(
-                sequence=1,
-                content=first_sentence,
-                image_prompt=self._generate_fallback_image_prompt(first_sentence, 1),
-                duration_seconds=duration,
-                animation_type="轻微放大",
-                subtitle_text=first_sentence
-            )
-            scenes.append(scene)
-        
-        # 后续每2句一段 - 添加长度预检查
-        remaining_sentences = sentences[1:]
-        scene_num = 2
-        sentence_index = 1  # 从第二句开始计数
-        
-        for i in range(0, len(remaining_sentences), 2):
-            # 取最多2句，但要检查长度限制
-            scene_sentences = remaining_sentences[i:i+2]
-            scene_content = ''.join(scene_sentences)
-            
-            # 🔍 长度预检查: 如果场景内容过长(>30字符)，单句成段  
-            if len(scene_content) > 30 and len(scene_sentences) > 1:
-                # 第一句单独成段
-                first_content = scene_sentences[0]
-                duration1 = self._calculate_scene_duration(first_content, sentence_index, 1, tts_subtitles) if tts_subtitles else request.scene_duration
-                
-                scene1 = Scene(
-                    sequence=scene_num,
-                    content=first_content,
-                    image_prompt=self._generate_fallback_image_prompt(first_content, scene_num),
-                    duration_seconds=duration1,
-                    animation_type="轻微放大",
-                    subtitle_text=first_content
-                )
-                scenes.append(scene1)
-                scene_num += 1
-                
-                # 如果有第二句，也单独成段
-                if len(scene_sentences) > 1:
-                    second_content = scene_sentences[1]
-                    duration2 = self._calculate_scene_duration(second_content, sentence_index + 1, 1, tts_subtitles) if tts_subtitles else request.scene_duration
-                    
-                    scene2 = Scene(
-                        sequence=scene_num,
-                        content=second_content,
-                        image_prompt=self._generate_fallback_image_prompt(second_content, scene_num),
-                        duration_seconds=duration2,
-                        animation_type="轻微放大",
-                        subtitle_text=second_content
-                    )
-                    scenes.append(scene2)
-                    scene_num += 1
-            else:
-                # 长度合适，按原逻辑处理
-                sentences_in_scene = len(scene_sentences)
-                duration = self._calculate_scene_duration(scene_content, sentence_index, sentences_in_scene, tts_subtitles) if tts_subtitles else request.scene_duration
-                
-                scene = Scene(
-                    sequence=scene_num,
-                    content=scene_content,
-                    image_prompt=self._generate_fallback_image_prompt(scene_content, scene_num),
-                    duration_seconds=duration,
-                    animation_type="轻微放大",
-                    subtitle_text=scene_content
-                )
-                scenes.append(scene)
-                scene_num += 1
-            
-            sentence_index += len(scene_sentences)
-        
-        self.logger.info(f"Coze rules splitting: {len(sentences)} sentences → {len(scenes)} scenes")
-        self.logger.debug(f"Scene breakdown: Scene 1 (1 sentence), Scenes 2-{len(scenes)} ({len(remaining_sentences)} sentences in groups of 2)")
-        
-        return scenes
-    
-    def _calculate_scene_duration(self, scene_content: str, sentence_start_index: int, sentences_count: int, tts_subtitles: Optional[List]) -> float:
-        """
-        基于TTS字幕信息计算场景时长
-        
-        Args:
-            scene_content: 场景内容
-            sentence_start_index: 句子起始索引
-            sentences_count: 句子数量
-            tts_subtitles: TTS字幕列表
-        
-        Returns:
-            float: 场景时长（秒）
-        """
-        if not tts_subtitles:
-            # 根据字符数量估算时长（每分钟约300字）
-            chars_per_minute = 300
-            estimated_duration = (len(scene_content) / chars_per_minute) * 60
-            return max(2.0, min(estimated_duration, 10.0))  # 限制在2-10秒之间
-        
-        try:
-            # 尝试根据TTS字幕计算精确时长
-            # 找到场景内容对应的字幕段
-            scene_start_time = None
-            scene_end_time = None
-            
-            for subtitle in tts_subtitles:
-                subtitle_text = subtitle.get('text', '').strip()
-                if not subtitle_text:
-                    continue
-                    
-                # 检查是否包含场景的开始文本
-                if scene_start_time is None and scene_content[:20] in subtitle_text:
-                    scene_start_time = subtitle.get('start', 0)
-                
-                # 检查是否包含场景的结束文本
-                if scene_content[-20:] in subtitle_text:
-                    scene_end_time = subtitle.get('end', subtitle.get('start', 0))
-            
-            if scene_start_time is not None and scene_end_time is not None:
-                duration = scene_end_time - scene_start_time
-                if duration > 0:
-                    self.logger.debug(f"TTS-based duration for scene: {duration:.2f}s")
-                    return duration
-        
-        except Exception as e:
-            self.logger.warning(f"Failed to calculate TTS-based duration: {e}")
-        
-        # 退化方案：基于字符数量估算
-        chars_per_minute = 300
-        estimated_duration = (len(scene_content) / chars_per_minute) * 60
-        return max(2.0, min(estimated_duration, 10.0))  # 限制在2-10秒之间
-
-    def _generate_fallback_image_prompt(self, content: str, sequence: int) -> str:
-        """
-        生成退化图像提示词（基于内容而非占位符）
-        
-        Args:
-            content: 场景内容
-            sequence: 场景序号
-        
-        Returns:
-            str: 图像提示词
-        """
-        import re
-        
-        # 提取关键词来生成图像描述
-        keywords = {
-            'characters': [],
-            'places': [],
-            'actions': [],
-            'objects': []
-        }
-        
-        # 常见历史人物名称
-        historical_figures = ['秦始皇', '嬴政', '朱元璋', '汉武帝', '唐太宗', '康熙', '乾隆', '武则天', '李世民', '刘邦', '项羽']
-        for figure in historical_figures:
-            if figure in content:
-                keywords['characters'].append(figure)
-        
-        # 常见地点
-        places = ['咸阳', '长安', '北京', '南京', '洛阳', '汴梁', '宫殿', '皇宫', '城墙', '战场', '朝堂']
-        for place in places:
-            if place in content:
-                keywords['places'].append(place)
-        
-        # 动作词
-        actions = ['战斗', '征战', '统一', '建立', '推翻', '称帝', '登基', '治理', '改革', '变法']
-        for action in actions:
-            if action in content:
-                keywords['actions'].append(action)
-        
-        # 物品
-        objects = ['龙袍', '铠甲', '兵器', '城池', '军队', '旗帜', '宫殿', '建筑']
-        for obj in objects:
-            if obj in content:
-                keywords['objects'].append(obj)
-        
-        # 创建中文到英文的人物映射
-        character_mapping = {
-            '秦始皇': 'Emperor Qin Shi Huang',
-            '嬴政': 'Emperor Qin Shi Huang',
-            '朱元璋': 'Emperor Zhu Yuanzhang',
-            '汉武帝': 'Emperor Wu of Han',
-            '唐太宗': 'Emperor Taizong of Tang',
-            '康熙': 'Emperor Kangxi',
-            '乾隆': 'Emperor Qianlong',
-            '武则天': 'Empress Wu Zetian',
-            '李世民': 'Emperor Taizong Li Shimin',
-            '刘邦': 'Emperor Liu Bang',
-            '项羽': 'Xiang Yu'
-        }
-        
-        # 创建中文到英文的地点映射
-        place_mapping = {
-            '咸阳': 'Xianyang',
-            '长安': "Chang'an",
-            '北京': 'Beijing',
-            '南京': 'Nanjing',
-            '洛阳': 'Luoyang',
-            '汴梁': 'Bianliang',
-            '宫殿': 'imperial palace',
-            '皇宫': 'royal palace',
-            '城墙': 'city walls',
-            '战场': 'battlefield',
-            '朝堂': 'imperial court'
-        }
-        
-        # 根据关键词组合生成英文描述，并引入不同镜头与视角，避免重复
-        camera_angles = [
-            'close-up portrait',
-            'wide establishing shot',
-            'low-angle dramatic shot',
-            'bird\'s-eye view',
-            'over-the-shoulder view',
-            'three-quarter view',
-            'side profile shot',
-            'back view silhouette'
-        ]
-        # 交替使用角度
-        angle = camera_angles[(sequence - 1) % len(camera_angles)]
-        if keywords['characters']:
-            character_cn = keywords['characters'][0]
-            character_en = character_mapping.get(character_cn, 'ancient Chinese emperor')
-            if keywords['places']:
-                place_cn = keywords['places'][0]
-                place_en = place_mapping.get(place_cn, 'ancient Chinese location')
-                return f"Ancient China, {character_en} in {place_en}, {angle}, wearing traditional imperial robes, stern and majestic expression, historical realistic style, ancient horror atmosphere, white background, dim colors, traditional clothing, high definition, high contrast, low saturation colors"
-            else:
-                return f"Ancient China, {character_en}, {angle}, wearing black dragon robe, stern and majestic face, ancient imperial palace background, historical realistic style, ancient horror atmosphere, white background, traditional clothing, high definition, high contrast, low saturation colors"
-        elif keywords['places']:
-            place_cn = keywords['places'][0]
-            place_en = place_mapping.get(place_cn, 'ancient Chinese architecture')
-            return f"Ancient China {place_en}, {angle}, magnificent architecture, ancient architectural style, dim lighting, rich historical atmosphere, ancient horror style, white background, traditional elements, high definition, high contrast, low saturation colors, solemn atmosphere"
-        elif keywords['actions']:
-            return f"Ancient China historical scene, {angle}, traditional costumes, ancient architectural background, historical realistic style, ancient horror atmosphere, white background, dim colors, traditional clothing, high definition, high contrast, low saturation colors, solemn atmosphere"
-        else:
-            # 最后的通用英文描述
-            return f"Ancient China historical scene, {angle}, traditional clothing, ancient architecture, dim tones, historical realistic style, ancient horror atmosphere, white background, traditional elements, high definition, high contrast, low saturation colors, solemn atmosphere"
-    
+#             response: LLM响应
+#             request: 原始请求
+#         
+#         Returns:
+#             List[Scene]: 解析的场景列表
+#         """
+#         self.logger.warning("Using fallback scene parsing")
+#         
+#         # 简单地将文案按句号分割
+#         sentences = [s.strip() for s in request.script_content.split('。') if s.strip()]
+#         
+#         # 如果句子数量不够，按照目标数量进行均匀分割
+#         if len(sentences) < request.target_scene_count:
+#             # 按字符数分割
+#             content_length = len(request.script_content)
+#             segment_length = content_length // request.target_scene_count
+#             
+#             scenes = []
+#             for i in range(request.target_scene_count):
+#                 start_idx = i * segment_length
+#                 end_idx = (i + 1) * segment_length if i < request.target_scene_count - 1 else content_length
+#                 
+#                 segment = request.script_content[start_idx:end_idx].strip()
+#                 
+#                 scene = Scene(
+#                     sequence=i + 1,
+#                     content=segment,
+#                     image_prompt=self._generate_fallback_image_prompt(segment, i + 1),
+#                     duration_seconds=request.scene_duration,
+#                     animation_type="轻微放大",
+#                     subtitle_text=segment[:50] + "..." if len(segment) > 50 else segment
+#                 )
+#                 
+#                 scenes.append(scene)
+#         else:
+#             # 如果句子太多，合并一些句子
+#             scenes_per_sentence = len(sentences) // request.target_scene_count
+#             scenes = []
+#             
+#             for i in range(request.target_scene_count):
+#                 start_idx = i * scenes_per_sentence
+#                 end_idx = (i + 1) * scenes_per_sentence if i < request.target_scene_count - 1 else len(sentences)
+#                 
+#                 content = '。'.join(sentences[start_idx:end_idx]) + '。'
+#                 
+#                 scene = Scene(
+#                     sequence=i + 1,
+#                     content=content,
+#                     image_prompt=self._generate_fallback_image_prompt(content, i + 1),
+#                     duration_seconds=request.scene_duration,
+#                     animation_type="轻微放大",
+#                     subtitle_text=content[:50] + "..." if len(content) > 50 else content
+#                 )
+#                 
+#                 scenes.append(scene)
+#         
+#         return scenes
+# 
+#     def _ensure_valid_image_prompts(self, scenes: List[Scene], request: SceneSplitRequest) -> List[Scene]:
+#         """校验并修正场景的图像提示词，确保英文、多样且不过度重复"""
+#         def contains_non_ascii(s: str) -> bool:
+#             try:
+#                 s.encode('ascii')
+#                 return False
+#             except Exception:
+#                 return True
+#         
+#         seen_prompts = set()
+#         fixed_scenes: List[Scene] = []
+#         for idx, scene in enumerate(scenes, start=1):
+#             prompt = scene.image_prompt or ""
+#             needs_fix = False
+#             if not prompt:
+#                 needs_fix = True
+#             elif contains_non_ascii(prompt):
+#                 needs_fix = True
+#             elif len(prompt) < 30:
+#                 needs_fix = True
+#             elif prompt in seen_prompts:
+#                 needs_fix = True
+#             
+#             if needs_fix:
+#                 new_prompt = self._generate_fallback_image_prompt(scene.content, idx)
+#                 self.logger.debug(f"Fixing image_prompt for scene {idx}: '{prompt[:40]}' -> '{new_prompt[:60]}'")
+#                 prompt = new_prompt
+#             
+#             seen_prompts.add(prompt)
+#             fixed_scenes.append(Scene(
+#                 sequence=scene.sequence,
+#                 content=scene.content,
+#                 image_prompt=prompt,
+#                 duration_seconds=scene.duration_seconds,
+#                 animation_type=scene.animation_type,
+#                 subtitle_text=scene.subtitle_text
+#             ))
+#         return fixed_scenes
+#     
+#     def _split_by_coze_rules(self, request: SceneSplitRequest, tts_subtitles: Optional[List] = None) -> List[Scene]:
+#         """
+#         按照原Coze工作流规则分割场景：第一句单独成段，后续每2句一段
+#         
+#         Args:
+#             request: 场景分割请求
+#             tts_subtitles: TTS返回的字幕时间戳信息（可选）
+#         
+#         Returns:
+#             List[Scene]: 场景列表
+#         """
+#         # 按句号分割句子，保留句号
+#         sentences = []
+#         current_sentence = ""
+#         
+#         for char in request.script_content:
+#             current_sentence += char
+#             if char in ['。', '！', '？']:  # 中文句末标点(恢复原逻辑)
+#                 if current_sentence.strip():
+#                     sentences.append(current_sentence.strip())
+#                 current_sentence = ""
+#         
+#         # 如果最后没有句末标点，添加最后一段
+#         if current_sentence.strip():
+#             sentences.append(current_sentence.strip())
+#         
+#         if not sentences:
+#             # 如果没有句子，将整个文本作为一个场景
+#             scenes = [Scene(
+#                 sequence=1,
+#                 content=request.script_content,
+#                 image_prompt=self._generate_fallback_image_prompt(request.script_content, 1),
+#                 duration_seconds=request.scene_duration,
+#                 animation_type="轻微放大",
+#                 subtitle_text=request.script_content[:50] + "..." if len(request.script_content) > 50 else request.script_content
+#             )]
+#             return scenes
+#         
+#         scenes = []
+#         
+#         # 第一句单独成段
+#         if sentences:
+#             first_sentence = sentences[0]
+#             # 计算第一句的时长
+#             duration = self._calculate_scene_duration(first_sentence, 0, 1, tts_subtitles) if tts_subtitles else request.scene_duration
+#             
+#             scene = Scene(
+#                 sequence=1,
+#                 content=first_sentence,
+#                 image_prompt=self._generate_fallback_image_prompt(first_sentence, 1),
+#                 duration_seconds=duration,
+#                 animation_type="轻微放大",
+#                 subtitle_text=first_sentence
+#             )
+#             scenes.append(scene)
+#         
+#         # 后续每2句一段 - 添加长度预检查
+#         remaining_sentences = sentences[1:]
+#         scene_num = 2
+#         sentence_index = 1  # 从第二句开始计数
+#         
+#         for i in range(0, len(remaining_sentences), 2):
+#             # 取最多2句，但要检查长度限制
+#             scene_sentences = remaining_sentences[i:i+2]
+#             scene_content = ''.join(scene_sentences)
+#             
+#             # 🔍 长度预检查: 如果场景内容过长(>30字符)，单句成段  
+#             if len(scene_content) > 30 and len(scene_sentences) > 1:
+#                 # 第一句单独成段
+#                 first_content = scene_sentences[0]
+#                 duration1 = self._calculate_scene_duration(first_content, sentence_index, 1, tts_subtitles) if tts_subtitles else request.scene_duration
+#                 
+#                 scene1 = Scene(
+#                     sequence=scene_num,
+#                     content=first_content,
+#                     image_prompt=self._generate_fallback_image_prompt(first_content, scene_num),
+#                     duration_seconds=duration1,
+#                     animation_type="轻微放大",
+#                     subtitle_text=first_content
+#                 )
+#                 scenes.append(scene1)
+#                 scene_num += 1
+#                 
+#                 # 如果有第二句，也单独成段
+#                 if len(scene_sentences) > 1:
+#                     second_content = scene_sentences[1]
+#                     duration2 = self._calculate_scene_duration(second_content, sentence_index + 1, 1, tts_subtitles) if tts_subtitles else request.scene_duration
+#                     
+#                     scene2 = Scene(
+#                         sequence=scene_num,
+#                         content=second_content,
+#                         image_prompt=self._generate_fallback_image_prompt(second_content, scene_num),
+#                         duration_seconds=duration2,
+#                         animation_type="轻微放大",
+#                         subtitle_text=second_content
+#                     )
+#                     scenes.append(scene2)
+#                     scene_num += 1
+#             else:
+#                 # 长度合适，按原逻辑处理
+#                 sentences_in_scene = len(scene_sentences)
+#                 duration = self._calculate_scene_duration(scene_content, sentence_index, sentences_in_scene, tts_subtitles) if tts_subtitles else request.scene_duration
+#                 
+#                 scene = Scene(
+#                     sequence=scene_num,
+#                     content=scene_content,
+#                     image_prompt=self._generate_fallback_image_prompt(scene_content, scene_num),
+#                     duration_seconds=duration,
+#                     animation_type="轻微放大",
+#                     subtitle_text=scene_content
+#                 )
+#                 scenes.append(scene)
+#                 scene_num += 1
+#             
+#             sentence_index += len(scene_sentences)
+#         
+#         self.logger.info(f"Coze rules splitting: {len(sentences)} sentences → {len(scenes)} scenes")
+#         self.logger.debug(f"Scene breakdown: Scene 1 (1 sentence), Scenes 2-{len(scenes)} ({len(remaining_sentences)} sentences in groups of 2)")
+#         
+#         return scenes
+#     
+#     def _calculate_scene_duration(self, scene_content: str, sentence_start_index: int, sentences_count: int, tts_subtitles: Optional[List]) -> float:
+#         """
+#         基于TTS字幕信息计算场景时长
+#         
+#         Args:
+#             scene_content: 场景内容
+#             sentence_start_index: 句子起始索引
+#             sentences_count: 句子数量
+#             tts_subtitles: TTS字幕列表
+#         
+#         Returns:
+#             float: 场景时长（秒）
+#         """
+#         if not tts_subtitles:
+#             # 根据字符数量估算时长（每分钟约300字）
+#             chars_per_minute = 300
+#             estimated_duration = (len(scene_content) / chars_per_minute) * 60
+#             return max(2.0, min(estimated_duration, 10.0))  # 限制在2-10秒之间
+#         
+#         try:
+#             # 尝试根据TTS字幕计算精确时长
+#             # 找到场景内容对应的字幕段
+#             scene_start_time = None
+#             scene_end_time = None
+#             
+#             for subtitle in tts_subtitles:
+#                 subtitle_text = subtitle.get('text', '').strip()
+#                 if not subtitle_text:
+#                     continue
+#                     
+#                 # 检查是否包含场景的开始文本
+#                 if scene_start_time is None and scene_content[:20] in subtitle_text:
+#                     scene_start_time = subtitle.get('start', 0)
+#                 
+#                 # 检查是否包含场景的结束文本
+#                 if scene_content[-20:] in subtitle_text:
+#                     scene_end_time = subtitle.get('end', subtitle.get('start', 0))
+#             
+#             if scene_start_time is not None and scene_end_time is not None:
+#                 duration = scene_end_time - scene_start_time
+#                 if duration > 0:
+#                     self.logger.debug(f"TTS-based duration for scene: {duration:.2f}s")
+#                     return duration
+#         
+#         except Exception as e:
+#             self.logger.warning(f"Failed to calculate TTS-based duration: {e}")
+#         
+#         # 退化方案：基于字符数量估算
+#         chars_per_minute = 300
+#         estimated_duration = (len(scene_content) / chars_per_minute) * 60
+#         return max(2.0, min(estimated_duration, 10.0))  # 限制在2-10秒之间
+# 
+#     # FALLBACK LOGIC REMOVED - 不再使用退化逻辑掩盖问题  
+#     # def _generate_fallback_image_prompt(self, content: str, sequence: int) -> str:
+#         """
+#         生成退化图像提示词（基于内容而非占位符）
+#         
+#         Args:
+#             content: 场景内容
+#             sequence: 场景序号
+#         
+#         Returns:
+#             str: 图像提示词
+#         """
+#         import re
+#         
+#         # 提取关键词来生成图像描述
+#         keywords = {
+#             'characters': [],
+#             'places': [],
+#             'actions': [],
+#             'objects': []
+#         }
+#         
+#         # 常见历史人物名称
+#         historical_figures = ['秦始皇', '嬴政', '朱元璋', '汉武帝', '唐太宗', '康熙', '乾隆', '武则天', '李世民', '刘邦', '项羽']
+#         for figure in historical_figures:
+#             if figure in content:
+#                 keywords['characters'].append(figure)
+#         
+#         # 常见地点
+#         places = ['咸阳', '长安', '北京', '南京', '洛阳', '汴梁', '宫殿', '皇宫', '城墙', '战场', '朝堂']
+#         for place in places:
+#             if place in content:
+#                 keywords['places'].append(place)
+#         
+#         # 动作词
+#         actions = ['战斗', '征战', '统一', '建立', '推翻', '称帝', '登基', '治理', '改革', '变法']
+#         for action in actions:
+#             if action in content:
+#                 keywords['actions'].append(action)
+#         
+#         # 物品
+#         objects = ['龙袍', '铠甲', '兵器', '城池', '军队', '旗帜', '宫殿', '建筑']
+#         for obj in objects:
+#             if obj in content:
+#                 keywords['objects'].append(obj)
+#         
+#         # 创建中文到英文的人物映射
+#         character_mapping = {
+#             '秦始皇': 'Emperor Qin Shi Huang',
+#             '嬴政': 'Emperor Qin Shi Huang',
+#             '朱元璋': 'Emperor Zhu Yuanzhang',
+#             '汉武帝': 'Emperor Wu of Han',
+#             '唐太宗': 'Emperor Taizong of Tang',
+#             '康熙': 'Emperor Kangxi',
+#             '乾隆': 'Emperor Qianlong',
+#             '武则天': 'Empress Wu Zetian',
+#             '李世民': 'Emperor Taizong Li Shimin',
+#             '刘邦': 'Emperor Liu Bang',
+#             '项羽': 'Xiang Yu'
+#         }
+#         
+#         # 创建中文到英文的地点映射
+#         place_mapping = {
+#             '咸阳': 'Xianyang',
+#             '长安': "Chang'an",
+#             '北京': 'Beijing',
+#             '南京': 'Nanjing',
+#             '洛阳': 'Luoyang',
+#             '汴梁': 'Bianliang',
+#             '宫殿': 'imperial palace',
+#             '皇宫': 'royal palace',
+#             '城墙': 'city walls',
+#             '战场': 'battlefield',
+#             '朝堂': 'imperial court'
+#         }
+#         
+#         # 根据关键词组合生成英文描述，并引入不同镜头与视角，避免重复
+#         camera_angles = [
+#             'close-up portrait',
+#             'wide establishing shot',
+#             'low-angle dramatic shot',
+#             'bird\'s-eye view',
+#             'over-the-shoulder view',
+#             'three-quarter view',
+#             'side profile shot',
+#             'back view silhouette'
+#         ]
+#         # 交替使用角度
+#         angle = camera_angles[(sequence - 1) % len(camera_angles)]
+#         if keywords['characters']:
+#             character_cn = keywords['characters'][0]
+#             character_en = character_mapping.get(character_cn, 'ancient Chinese emperor')
+#             if keywords['places']:
+#                 place_cn = keywords['places'][0]
+#                 place_en = place_mapping.get(place_cn, 'ancient Chinese location')
+#                 return f"Ancient China, {character_en} in {place_en}, {angle}, wearing traditional imperial robes, stern and majestic expression, historical realistic style, ancient horror atmosphere, white background, dim colors, traditional clothing, high definition, high contrast, low saturation colors"
+#             else:
+#                 return f"Ancient China, {character_en}, {angle}, wearing black dragon robe, stern and majestic face, ancient imperial palace background, historical realistic style, ancient horror atmosphere, white background, traditional clothing, high definition, high contrast, low saturation colors"
+#         elif keywords['places']:
+#             place_cn = keywords['places'][0]
+#             place_en = place_mapping.get(place_cn, 'ancient Chinese architecture')
+#             return f"Ancient China {place_en}, {angle}, magnificent architecture, ancient architectural style, dim lighting, rich historical atmosphere, ancient horror style, white background, traditional elements, high definition, high contrast, low saturation colors, solemn atmosphere"
+#         elif keywords['actions']:
+#             return f"Ancient China historical scene, {angle}, traditional costumes, ancient architectural background, historical realistic style, ancient horror atmosphere, white background, dim colors, traditional clothing, high definition, high contrast, low saturation colors, solemn atmosphere"
+#         else:
+#             # 最后的通用英文描述
+#             return f"Ancient China historical scene, {angle}, traditional clothing, ancient architecture, dim tones, historical realistic style, ancient horror atmosphere, white background, traditional elements, high definition, high contrast, low saturation colors, solemn atmosphere"
+#     
     def _scene_to_dict(self, scene: Scene) -> Dict[str, Any]:
         """将Scene对象转换为字典"""
         return {
@@ -914,6 +909,8 @@ Ahora por favor divide el siguiente guión de historia histórica:
             'animation_type': scene.animation_type,
             'subtitle_text': scene.subtitle_text
         }
+    
+
     
     def split_scenes_sync(self, request: SceneSplitRequest) -> SceneSplitResult:
         """

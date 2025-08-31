@@ -412,12 +412,12 @@ Ahora por favor analiza los personajes en la siguiente historia histórica:
             
         except json.JSONDecodeError as e:
             self.logger.error(f"JSON parsing error: {e}")
-            # 尝试退化处理
-            return self._fallback_character_parsing(response, request)
+            self.logger.error(f"Raw LLM response that caused JSON error: {response[:1000]}...")
+            raise ValueError(f"LLM returned invalid JSON format: {e}")
         except Exception as e:
             self.logger.error(f"Character parsing error: {e}")
-            # 尝试退化处理
-            return self._fallback_character_parsing(response, request)
+            self.logger.error(f"Raw LLM response: {response[:1000]}...")
+            raise
     
     def _extract_json_from_response(self, response: str) -> Optional[str]:
         """从响应中提取JSON内容"""
@@ -442,31 +442,7 @@ Ahora por favor analiza los personajes en la siguiente historia histórica:
         
         return None
     
-    def _fallback_character_parsing(self, response: str, request: CharacterAnalysisRequest) -> Tuple[List[Character], Optional[Character]]:
-        """
-        退化的角色解析（当JSON解析失败时）
-        
-        Args:
-            response: LLM响应
-            request: 原始请求
-        
-        Returns:
-            Tuple[List[Character], Optional[Character]]: 角色列表和主角
-        """
-        self.logger.warning("Using fallback character parsing")
-        
-        # 简单创建一个通用角色
-        character = Character(
-            name="历史人物",
-            description="故事中的重要角色",
-            role="主角",
-            appearance="古代装束，庄重威严",
-            personality="坚毅勇敢，富有智慧",
-            historical_significance="在历史中占有重要地位",
-            image_prompt="古代历史人物，庄严肃穆，威严庄重，古代服饰，传统服装，高清，高对比度，浅景深"
-        )
-        
-        return [character], character
+    # FALLBACK LOGIC REMOVED - 不再使用退化逻辑掩盖问题
     
     def _character_to_dict(self, character: Character) -> Dict[str, Any]:
         """将Character对象转换为字典"""

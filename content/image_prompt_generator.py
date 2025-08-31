@@ -296,12 +296,12 @@ class ImagePromptGenerator:
             
         except json.JSONDecodeError as e:
             self.logger.error(f"JSON parsing error: {e}")
-            # 尝试退化处理
-            return self._fallback_image_prompt_generation(original_scenes)
+            self.logger.error(f"Raw LLM response that caused JSON error: {response[:1000]}...")
+            raise ValueError(f"LLM returned invalid JSON format: {e}")
         except Exception as e:
             self.logger.error(f"Image prompt parsing error: {e}")
-            # 尝试退化处理
-            return self._fallback_image_prompt_generation(original_scenes)
+            self.logger.error(f"Raw LLM response: {response[:1000]}...")
+            raise
     
     def _extract_json_from_response(self, response: str) -> Optional[str]:
         """从响应中提取JSON内容"""
@@ -338,49 +338,7 @@ class ImagePromptGenerator:
         
         return None
     
-    def _fallback_image_prompt_generation(self, original_scenes: List[Scene]) -> List[Scene]:
-        """
-        退化的图像提示词生成（当LLM失败时）
-        
-        Args:
-            original_scenes: 原始场景列表
-        
-        Returns:
-            List[Scene]: 更新后的场景列表
-        """
-        self.logger.warning("Using fallback image prompt generation")
-        
-        # 预定义的多样化提示词模板
-        prompt_templates = [
-            "Ancient China, close-up portrait, Emperor Qin Shi Huang wearing black dragon robe, stern expression, palace interior with ornate decorations, dramatic lighting, ancient horror style, high contrast, low saturation",
-            "Ancient China, wide establishing shot, imperial palace courtyard, traditional architecture with red pillars, misty atmosphere, soldiers in formation, ancient horror style, dim colors, high definition",
-            "Ancient China, low-angle dramatic shot, ancient Chinese general in armor, battlefield background, war banners flying, dusty atmosphere, ancient horror style, rough lines, shallow depth of field",
-            "Ancient China, bird's eye view, ancient city walls and fortifications, surrounding landscape, twilight sky, ancient horror atmosphere, high contrast, traditional elements",
-            "Ancient China, over-the-shoulder view, scholar or advisor character, ancient library or study room, scrolls and books, candlelight, ancient horror style, low saturation colors",
-            "Ancient China, three-quarter view, imperial court scene, officials in traditional robes, throne room setting, ceremonial atmosphere, ancient horror style, solemn mood",
-            "Ancient China, side profile shot, warrior character in battle armor, weapon in hand, ancient battlefield, smoke and dust, ancient horror style, dramatic shadows",
-            "Ancient China, back view silhouette, figure against ancient architecture, sunset or dawn lighting, majestic landscape, ancient horror atmosphere, high definition"
-        ]
-        
-        updated_scenes = []
-        
-        for i, scene in enumerate(original_scenes):
-            # 循环使用不同的模板确保多样性
-            template_index = i % len(prompt_templates)
-            image_prompt = prompt_templates[template_index]
-            
-            updated_scene = Scene(
-                sequence=scene.sequence,
-                content=scene.content,
-                image_prompt=image_prompt,
-                duration_seconds=scene.duration_seconds,
-                animation_type=scene.animation_type,
-                subtitle_text=scene.subtitle_text
-            )
-            
-            updated_scenes.append(updated_scene)
-        
-        return updated_scenes
+    # FALLBACK LOGIC REMOVED - 不再使用退化逻辑掩盖问题
     
     def _scene_to_dict(self, scene: Scene) -> Dict[str, Any]:
         """将Scene对象转换为字典"""

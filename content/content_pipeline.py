@@ -95,7 +95,7 @@ class ContentPipeline:
             scene_request = SceneSplitRequest(
                 script_content=script_result.content,
                 language=request.language,
-                use_coze_rules=True,  # 启用原工作流分割规则
+                use_coze_rules=False,  # 强制使用LLM生成具体图像提示词，不使用fallback
                 target_scene_count=request.target_scene_count,
                 scene_duration=request.scene_duration
             )

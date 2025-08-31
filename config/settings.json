@@ -53,13 +53,20 @@
   },
   "media": {
     "image": {
-      "resolution": "1024x768",
+      "resolution": "832x1216",
       "quality": "high",
       "style": "ancient_horror",
       "ddim_steps": 40,
       "model_id": 8,
       "primary_provider": "runninghub",
-      "fallback_providers": ["openai"]
+      "fallback_providers": ["openai"],
+      "runninghub": {
+        "workflow_id": "1958005140101935106",
+        "prompt_node_id": "39",
+        "resolution_node_id": "5",
+        "supports_custom_resolution": true,
+        "notes": "已配置正确的节点ID，支持1024x1024自定义分辨率"
+      }
     },
     "audio": {
       "voice_id": "21m00Tcm4TlvDq8ikWAM",
@@ -108,7 +115,7 @@
     "main_border_color": "#000000",
     "title_color": "#000000",
     "title_border_color": "#ffffff",
-    "margin_v": 80,
+    "margin_v": 140,
     "outline": 3,
     "alignment": 2
   },
@@ -126,10 +133,8 @@
     "enabled": false
   },
   "animation": {
-    "scene_scale_range": [
-      1.0,
-      1.5
-    ],
+    "scene_scale_range": [1.0, 1.15],
+    "allowed_modes": ["center_zoom_in", "move_left", "center_zoom_out", "move_right", "move_up", "move_down"],
     "character_scale_sequence": [
       2.0,
       1.2,
