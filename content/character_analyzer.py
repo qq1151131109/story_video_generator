@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from core.config_manager import ConfigManager, ModelConfig
 from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
+from utils.llm_client_manager import LLMClientManager
 
 @dataclass
 class Character:
@@ -55,9 +56,9 @@ class CharacterAnalyzer:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager: CacheManager, file_manager: FileManager):
+                 cache_manager, file_manager: FileManager):
         self.config = config_manager
-        self.cache = cache_manager
+        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
@@ -67,20 +68,12 @@ class CharacterAnalyzer:
         # 获取LLM配置
         self.llm_config = self.config.get_llm_config('character_analysis')
         
-        # 配置OpenAI客户端
-        self._setup_openai_client()
+        # 初始化多提供商LLM客户端管理器
+        self.llm_manager = LLMClientManager(config_manager)
         
         # 加载提示词模板
         self._load_prompt_templates()
     
-    def _setup_openai_client(self):
-        """配置OpenAI客户端"""
-        self.client = openai.AsyncOpenAI(
-            api_key=self.llm_config.api_key,
-            base_url=self.llm_config.api_base
-        )
-        
-        self.logger.info(f"Initialized OpenAI client for character analysis")
     
     def _load_prompt_templates(self):
         """加载提示词模板"""
@@ -254,23 +247,7 @@ Ahora por favor analiza los personajes en la siguiente historia histórica:
         start_time = time.time()
         
         try:
-            # 检查缓存
-            cache_key = self.cache.get_cache_key({
-                'script_content': request.script_content,
-                'language': request.language,
-                'max_characters': request.max_characters
-            })
-            
-            cached_result = self.cache.get('characters', cache_key)
-            if cached_result:
-                self.logger.info(f"Cache hit for character analysis: {request.language}")
-                cached_result['analysis_time'] = time.time() - start_time
-                # 重构Character对象
-                characters = [Character(**char_data) for char_data in cached_result['characters']]
-                cached_result['characters'] = characters
-                if cached_result.get('main_character'):
-                    cached_result['main_character'] = Character(**cached_result['main_character'])
-                return CharacterAnalysisResult(**cached_result)
+            # 缓存已禁用 - 每次都生成新内容
             
             # 验证请求
             if request.language not in self.supported_languages:
@@ -313,7 +290,7 @@ Ahora por favor analiza los personajes en la siguiente historia histórica:
                 'model_used': result.model_used
             }
             
-            self.cache.set('characters', cache_key, cache_data)
+            # 缓存已禁用
             
             # 记录日志
             logger = self.config.get_logger('story_generator')
@@ -347,19 +324,15 @@ Ahora por favor analiza los personajes en la siguiente historia histórica:
             str: LLM响应
         """
         try:
-            response = await self.client.chat.completions.create(
-                model=self.llm_config.name,
-                messages=[{
-                    "role": "user",
-                    "content": prompt
-                }],
+            content = await self.llm_manager.call_llm_with_fallback(
+                prompt=prompt,
+                task_type='character_analysis',
                 temperature=self.llm_config.temperature,
                 max_tokens=self.llm_config.max_tokens
             )
             
-            content = response.choices[0].message.content
             if not content:
-                raise ValueError("Empty response from LLM")
+                raise ValueError("Empty response from all LLM providers")
             
             return content.strip()
             
@@ -603,11 +576,11 @@ Ahora por favor analiza los personajes en la siguiente historia histórica:
     
     def get_analysis_stats(self) -> Dict[str, Any]:
         """获取分析统计信息"""
-        cache_stats = self.cache.get_cache_stats()
+        # 缓存已删除
         
         return {
             'supported_languages': self.supported_languages,
-            'cache_stats': cache_stats.get('disk_cache', {}).get('characters', {}),
+            # 缓存已删除
             'model_config': {
                 'name': self.llm_config.name,
                 'temperature': self.llm_config.temperature,

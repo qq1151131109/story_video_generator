@@ -8,15 +8,24 @@ import base64
 import time
 import json
 import os
+import subprocess
 from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
 import logging
 from dataclasses import dataclass
 import hashlib
+from io import BytesIO
 
 from core.config_manager import ConfigManager
 from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
+
+# ElevenLabs imports (需要先安装: pip install elevenlabs)
+try:
+    from elevenlabs.client import ElevenLabs
+    ELEVENLABS_AVAILABLE = True
+except ImportError:
+    ELEVENLABS_AVAILABLE = False
 
 @dataclass
 class AudioGenerationRequest:
@@ -28,6 +37,14 @@ class AudioGenerationRequest:
     speed: float = 1.2           # 语速（对应原工作流）
     volume: float = 1.0          # 音量
     format: str = "mp3"          # 输出格式
+
+@dataclass  
+class AudioSubtitle:
+    """音频字幕信息"""
+    text: str                    # 字幕文本
+    start_time: float           # 开始时间（秒）
+    end_time: float             # 结束时间（秒）
+    duration: float             # 持续时间（秒）
 
 @dataclass
 class GeneratedAudio:
@@ -42,6 +59,7 @@ class GeneratedAudio:
     format: str                  # 音频格式
     generation_time: float       # 生成耗时
     file_path: Optional[str] = None  # 保存的文件路径
+    subtitles: Optional[List[AudioSubtitle]] = None  # 字幕时间戳信息
 
 class AudioGenerator:
     """
@@ -54,9 +72,9 @@ class AudioGenerator:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager: CacheManager, file_manager: FileManager):
+                 cache_manager, file_manager: FileManager):
         self.config = config_manager
-        self.cache = cache_manager
+        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.media')
         
@@ -70,14 +88,58 @@ class AudioGenerator:
             'openai': config_manager.get_api_key('openrouter')
         }
         
-        # 提供商优先级 - MiniMax作为主要提供商（同步版本）
+        # 提供商优先级 - 保持兼容性
         self.primary_provider = self.audio_config.get('primary_provider', 'minimax')
         self.fallback_providers = self.audio_config.get('fallback_providers', ['elevenlabs'])
+        
+        # 语言专用提供商策略 - 使用配置文件中的primary_provider
+        self.language_providers = {
+            'zh': self.primary_provider,
+            'en': self.primary_provider,
+            'es': self.primary_provider,
+        }
         
         # 语音配置
         self._load_voice_configs()
         
+        # 初始化ElevenLabs客户端
+        if ELEVENLABS_AVAILABLE and self.api_keys.get('elevenlabs'):
+            self.elevenlabs_client = ElevenLabs(api_key=self.api_keys['elevenlabs'])
+        else:
+            self.elevenlabs_client = None
+        
         self.logger.info(f"Audio generator initialized with primary provider: {self.primary_provider}")
+    
+    def _get_actual_audio_duration_from_data(self, audio_data: bytes) -> float:
+        """从音频数据获取实际时长"""
+        try:
+            # 写入临时文件
+            temp_path = self.file_manager.get_temp_path('audio', f'duration_check_{int(time.time())}.mp3')
+            with open(temp_path, 'wb') as f:
+                f.write(audio_data)
+            
+            # 使用FFprobe获取时长
+            result = subprocess.run([
+                'ffprobe', '-v', 'quiet',
+                '-show_entries', 'format=duration',
+                '-of', 'csv=p=0',
+                temp_path
+            ], capture_output=True, text=True)
+            
+            # 清理临时文件
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+            
+            if result.returncode == 0 and result.stdout.strip():
+                return float(result.stdout.strip())
+            else:
+                return 0.0
+                
+        except Exception as e:
+            self.logger.warning(f"Failed to get audio duration from data: {e}")
+            return 0.0
     
     def _load_voice_configs(self):
         """加载语音配置"""
@@ -138,32 +200,15 @@ class AudioGenerator:
         start_time = time.time()
         
         try:
-            # 检查缓存
-            cache_key = self.cache.get_cache_key({
-                'text': request.text,
-                'language': request.language,
-                'voice_id': request.voice_id or self.default_voice_id,
-                'speed': request.speed,
-                'volume': request.volume
-            })
+            # 缓存已禁用 - 每次都生成新音频
             
-            cached_result = self.cache.get('audio', cache_key)
-            if cached_result:
-                self.logger.info(f"Cache hit for audio generation: {request.text[:30]}...")
-                cached_result['generation_time'] = time.time() - start_time
-                return GeneratedAudio(**cached_result)
-            
-            # 智能选择提供商：中文使用MiniMax，英文使用ElevenLabs
+            # 智能选择提供商：基于语言专用策略
             if provider:
                 providers_to_try = [provider]
             else:
-                if request.language == 'zh':
-                    providers_to_try = ['minimax'] + self.fallback_providers
-                elif request.language == 'en':
-                    providers_to_try = ['elevenlabs', 'minimax'] + [p for p in self.fallback_providers if p != 'elevenlabs']
-                else:
-                    # 其他语言使用默认策略
-                    providers_to_try = [self.primary_provider] + self.fallback_providers
+                # 根据语言选择最佳提供商
+                preferred_provider = self.language_providers.get(request.language, self.primary_provider)
+                providers_to_try = [preferred_provider] + [p for p in self.fallback_providers if p != preferred_provider]
             
             last_error = None
             for provider_name in providers_to_try:
@@ -174,14 +219,25 @@ class AudioGenerator:
                 try:
                     self.logger.info(f"Generating audio with {provider_name}: {request.text[:30]}...")
                     
+                    # 为每个provider创建适当的请求副本
+                    provider_request = AudioGenerationRequest(
+                        text=request.text,
+                        language=request.language,
+                        voice_id="",  # 将由具体provider方法设置
+                        voice_style=request.voice_style,
+                        speed=request.speed,
+                        volume=request.volume,
+                        format=request.format
+                    )
+                    
                     if provider_name == 'minimax':
-                        result = await self._generate_with_minimax_sync(request)
+                        result = await self._generate_with_minimax_sync(provider_request)
                     elif provider_name == 'azure':
-                        result = await self._generate_with_azure(request)
+                        result = await self._generate_with_azure(provider_request)
                     elif provider_name == 'elevenlabs':
-                        result = await self._generate_with_elevenlabs(request)
+                        result = await self._generate_with_elevenlabs(provider_request)
                     elif provider_name == 'openai':
-                        result = await self._generate_with_openai(request)
+                        result = await self._generate_with_openai(provider_request)
                     else:
                         continue
                     
@@ -197,7 +253,7 @@ class AudioGenerator:
                         'format': result.format
                     }
                     
-                    self.cache.set('audio', cache_key, cache_data)
+                    # 缓存已禁用
                     
                     # 记录日志
                     # 保存音频文件
@@ -255,6 +311,7 @@ class AudioGenerator:
             "stream": False,  # 同步模式
             "language_boost": "Chinese" if request.language == 'zh' else "auto",
             "output_format": "hex",  # 返回hex编码
+            "subtitle_enable": True,  # 启用字幕功能
             "voice_setting": {
                 "voice_id": voice_id,
                 "speed": request.speed,
@@ -285,6 +342,11 @@ class AudioGenerator:
                 
                 result = await response.json()
                 
+                self.logger.debug(f"MiniMax response keys: {list(result.keys())}")
+                if 'data' in result:
+                    data_keys = list(result['data'].keys()) if result['data'] else []
+                    self.logger.debug(f"MiniMax data keys: {data_keys}")
+                
                 if result.get('base_resp', {}).get('status_code') != 0:
                     error_msg = result.get('base_resp', {}).get('status_msg', 'Unknown error')
                     raise Exception(f"MiniMax sync failed: {error_msg}")
@@ -299,20 +361,90 @@ class AudioGenerator:
                 
                 self.logger.info(f"MiniMax sync TTS completed: {len(audio_data)} bytes")
                 
-                # 估算音频时长
-                char_count = len(request.text)
-                estimated_duration = (char_count / 5.0) / request.speed
+                # 处理字幕数据（MiniMax返回字幕文件URL）
+                subtitles = []
+                subtitle_file_url = result.get('data', {}).get('subtitle_file')
+                
+                if subtitle_file_url:
+                    self.logger.info(f"Downloading subtitle file from MiniMax")
+                    self.logger.debug(f"Subtitle file URL: {subtitle_file_url}")
+                    
+                    # 下载字幕文件
+                    async with aiohttp.ClientSession() as subtitle_session:
+                        async with subtitle_session.get(subtitle_file_url) as subtitle_response:
+                            if subtitle_response.status == 200:
+                                subtitle_content = await subtitle_response.text()
+                                self.logger.debug(f"Subtitle file content preview: {subtitle_content[:200]}...")
+                                
+                                # 解析字幕文件内容（假设是JSON格式）
+                                try:
+                                    import json
+                                    subtitle_data = json.loads(subtitle_content)
+                                    
+                                    # 根据实际格式解析字幕数据
+                                    if isinstance(subtitle_data, list):
+                                        for item in subtitle_data:
+                                            start_ms = None
+                                            end_ms = None
+                                            text = None
+                                            
+                                            if isinstance(item, dict):
+                                                # MiniMax格式: {time_begin: ms, time_end: ms, text: "..."}
+                                                if 'time_begin' in item and 'time_end' in item and 'text' in item:
+                                                    start_ms = float(item['time_begin'])
+                                                    end_ms = float(item['time_end'])
+                                                    text = item['text'].strip()
+                                                # 通用格式1: {start: ms, end: ms, text: "..."}
+                                                elif 'start' in item and 'end' in item and 'text' in item:
+                                                    start_ms = float(item['start'])
+                                                    end_ms = float(item['end'])
+                                                    text = item['text'].strip()
+                                                # 通用格式2: {begin_time: ms, end_time: ms, text: "..."}
+                                                elif 'begin_time' in item and 'end_time' in item and 'text' in item:
+                                                    start_ms = float(item['begin_time'])
+                                                    end_ms = float(item['end_time'])
+                                                    text = item['text'].strip()
+                                                
+                                                if start_ms is not None and end_ms is not None and text and end_ms > start_ms:
+                                                    subtitle = AudioSubtitle(
+                                                        text=text,
+                                                        start_time=start_ms / 1000.0,  # 转换为秒
+                                                        end_time=end_ms / 1000.0,      # 转换为秒
+                                                        duration=(end_ms - start_ms) / 1000.0
+                                                    )
+                                                    subtitles.append(subtitle)
+                                                    self.logger.debug(f"Added subtitle: {start_ms/1000.0:.2f}s-{end_ms/1000.0:.2f}s: {text[:30]}...")
+                                    
+                                    self.logger.info(f"Successfully processed {len(subtitles)} subtitle segments from MiniMax")
+                                    
+                                except Exception as parse_error:
+                                    self.logger.warning(f"Failed to parse MiniMax subtitle file: {parse_error}")
+                            else:
+                                self.logger.warning(f"Failed to download subtitle file: HTTP {subtitle_response.status}")
+                else:
+                    self.logger.info("No subtitle file URL returned by MiniMax")
+                
+                # 获取实际音频时长（从extra_info或FFprobe）
+                actual_duration = result.get('extra_info', {}).get('audio_length', 0) / 1000.0
+                if actual_duration == 0:
+                    # 使用FFprobe获取实际时长
+                    actual_duration = self._get_actual_audio_duration_from_data(audio_data)
+                    if actual_duration == 0:
+                        # 最后备用估算
+                        char_count = len(request.text)
+                        actual_duration = (char_count / 5.0) / request.speed
                 
                 return GeneratedAudio(
                     audio_data=audio_data,
                     text=request.text,
                     language=request.language,
                     voice_id=voice_id,
-                    duration_seconds=estimated_duration,
+                    duration_seconds=actual_duration,
                     file_size=len(audio_data),
                     provider='minimax',
                     format='mp3',
-                    generation_time=time.time() - start_time
+                    generation_time=time.time() - start_time,
+                    subtitles=subtitles if subtitles else None
                 )
 
     async def _generate_with_azure(self, request: AudioGenerationRequest) -> GeneratedAudio:
@@ -369,56 +501,124 @@ class AudioGenerator:
                 )
     
     async def _generate_with_elevenlabs(self, request: AudioGenerationRequest) -> GeneratedAudio:
-        """使用ElevenLabs生成音频"""
+        """使用ElevenLabs生成音频 + Forced Alignment字幕"""
         start_time = time.time()
+        
+        if not self.elevenlabs_client:
+            raise Exception("ElevenLabs client not available. Please install elevenlabs package.")
         
         # 获取语音ID
         voice_config = self.voice_configs['elevenlabs'].get(request.language, self.voice_configs['elevenlabs']['en'])
         voice_id = request.voice_id or voice_config['voice_id']
         
-        # ElevenLabs API
-        api_url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-        
-        payload = {
-            "text": request.text,
-            "model_id": "eleven_multilingual_v2",
-            "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.75,
-                "style": 0.0,
-                "use_speaker_boost": True
-            }
-        }
-        
-        headers = {
-            "xi-api-key": self.api_keys['elevenlabs'],
-            "Content-Type": "application/json",
-            "Accept": "audio/mpeg"
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(api_url, json=payload, headers=headers) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"ElevenLabs API error {response.status}: {error_text}")
+        try:
+            # Step 1: 生成音频
+            self.logger.info(f"Generating audio with ElevenLabs voice: {voice_id}")
+            
+            # 使用ElevenLabs SDK生成音频
+            audio_response = self.elevenlabs_client.text_to_speech.convert(
+                voice_id=voice_id,
+                text=request.text,
+                model_id="eleven_multilingual_v2"
+            )
+            
+            # 收集音频数据
+            audio_data = b""
+            for chunk in audio_response:
+                audio_data += chunk
+            
+            self.logger.info(f"ElevenLabs TTS completed: {len(audio_data)} bytes")
+            
+            # Step 2: 保存临时音频文件用于Forced Alignment
+            temp_audio_path = self.file_manager.get_temp_path('audio', f'elevenlabs_temp_{int(time.time())}.mp3')
+            with open(temp_audio_path, 'wb') as f:
+                f.write(audio_data)
+            
+            # Step 3: 使用Forced Alignment获取精确时间戳
+            subtitles = []
+            try:
+                self.logger.info("Running ElevenLabs Forced Alignment...")
                 
-                audio_data = await response.read()
+                with open(temp_audio_path, 'rb') as f:
+                    audio_file = BytesIO(f.read())
                 
-                # 估算音频时长
-                char_count = len(request.text)
-                estimated_duration = (char_count / 5.0) / request.speed
-                
-                return GeneratedAudio(
-                    audio_data=audio_data,
-                    text=request.text,
-                    language=request.language,
-                    voice_id=voice_id,
-                    duration_seconds=estimated_duration,
-                    file_size=len(audio_data),
-                    provider='elevenlabs',
-                    format='mp3',
-                    generation_time=time.time() - start_time
+                # 调用Forced Alignment API
+                transcription = self.elevenlabs_client.forced_alignment.create(
+                    file=audio_file,
+                    text=request.text
                 )
+                
+                # 解析时间戳
+                if hasattr(transcription, 'words') and transcription.words:
+                    self.logger.info(f"Received {len(transcription.words)} word alignments")
+                    
+                    # 按句子分组单词
+                    current_sentence = ""
+                    sentence_start = 0.0
+                    sentence_end = 0.0
+                    
+                    for word_info in transcription.words:
+                        current_sentence += word_info.text + " "
+                        sentence_end = word_info.end
+                        
+                        # 检查是否是句子结束
+                        if word_info.text.strip().endswith(('.', '!', '?', '。', '！', '？')):
+                            subtitle = AudioSubtitle(
+                                text=current_sentence.strip(),
+                                start_time=sentence_start,
+                                end_time=sentence_end,
+                                duration=sentence_end - sentence_start
+                            )
+                            subtitles.append(subtitle)
+                            current_sentence = ""
+                            sentence_start = sentence_end
+                    
+                    # 处理剩余文本
+                    if current_sentence.strip():
+                        subtitle = AudioSubtitle(
+                            text=current_sentence.strip(),
+                            start_time=sentence_start,
+                            end_time=sentence_end,
+                            duration=sentence_end - sentence_start
+                        )
+                        subtitles.append(subtitle)
+                        
+                else:
+                    self.logger.warning("No word alignments received from ElevenLabs")
+                    
+            except Exception as alignment_error:
+                self.logger.warning(f"Forced Alignment failed: {alignment_error}, using estimated timing")
+            
+            finally:
+                # 清理临时文件
+                try:
+                    os.unlink(temp_audio_path)
+                except:
+                    pass
+            
+            # Step 4: 获取实际音频时长
+            actual_duration = self._get_actual_audio_duration_from_data(audio_data)
+            if actual_duration == 0:
+                # 备用估算
+                char_count = len(request.text)
+                actual_duration = (char_count / 5.0) / request.speed
+            
+            return GeneratedAudio(
+                audio_data=audio_data,
+                text=request.text,
+                language=request.language,
+                voice_id=voice_id,
+                duration_seconds=actual_duration,
+                file_size=len(audio_data),
+                provider='elevenlabs',
+                format='mp3',
+                generation_time=time.time() - start_time,
+                subtitles=subtitles if subtitles else None
+            )
+            
+        except Exception as e:
+            self.logger.error(f"ElevenLabs generation failed: {e}")
+            raise
     
     async def _generate_with_openai(self, request: AudioGenerationRequest) -> GeneratedAudio:
         """使用OpenAI TTS生成音频"""
@@ -487,7 +687,7 @@ class AudioGenerator:
         return asyncio.run(self.generate_audio_async(request, provider))
     
     async def batch_generate_audio(self, requests: List[AudioGenerationRequest], 
-                                 max_concurrent: int = 3) -> List[GeneratedAudio]:
+                                 max_concurrent: int = 3, provider: Optional[str] = None) -> List[Optional[GeneratedAudio]]:
         """
         批量生成音频
         
@@ -504,26 +704,27 @@ class AudioGenerator:
         
         async def generate_with_semaphore(request: AudioGenerationRequest) -> GeneratedAudio:
             async with semaphore:
-                return await self.generate_audio_async(request)
+                return await self.generate_audio_async(request, provider)
         
         # 执行并发生成
         tasks = [generate_with_semaphore(request) for request in requests]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # 处理结果和异常
-        successful_results = []
+        # 处理结果和异常：按输入顺序返回，失败用None占位
+        ordered_results: List[Optional[GeneratedAudio]] = []
         failed_count = 0
         
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 self.logger.error(f"Batch audio generation failed for request {i}: {result}")
+                ordered_results.append(None)
                 failed_count += 1
             else:
-                successful_results.append(result)
+                ordered_results.append(result)
         
-        self.logger.info(f"Batch audio generation completed: {len(successful_results)} successful, {failed_count} failed")
+        self.logger.info(f"Batch audio generation completed: {len(requests) - failed_count} successful, {failed_count} failed")
         
-        return successful_results
+        return ordered_results
     
     def save_audio(self, audio: GeneratedAudio, output_dir: Optional[str] = None, 
                    filename: Optional[str] = None) -> str:
@@ -606,7 +807,7 @@ class AudioGenerator:
     
     def get_generation_stats(self) -> Dict[str, Any]:
         """获取音频生成统计信息"""
-        cache_stats = self.cache.get_cache_stats()
+        # 缓存已删除
         
         return {
             'providers': {
@@ -614,7 +815,7 @@ class AudioGenerator:
                 'fallback': self.fallback_providers,
                 'available_keys': [k for k, v in self.api_keys.items() if v]
             },
-            'cache_stats': cache_stats.get('disk_cache', {}).get('audio', {}),
+            # 缓存已删除
             'config': {
                 'voice_speed': self.audio_config.get('voice_speed', 1.2),
                 'voice_volume': self.audio_config.get('voice_volume', 1.0),

@@ -1,0 +1,30 @@
+{
+  "batch_info": {
+    "name": "小型测试批次",
+    "description": "测试JSON批量生成功能",
+    "created_at": "2025-08-31",
+    "total_stories": 2
+  },
+  "settings": {
+    "default_language": "zh",
+    "concurrent_limit": 1,
+    "output_format": "mp4",
+    "enable_subtitles": true
+  },
+  "stories": [
+    {
+      "id": "test_001",
+      "title": "秦始皇统一文字",
+      "language": "zh",
+      "style": "documentary",
+      "priority": 1
+    },
+    {
+      "id": "test_002", 
+      "title": "汉武帝开疆拓土",
+      "language": "zh",
+      "style": "horror",
+      "priority": 2
+    }
+  ]
+}

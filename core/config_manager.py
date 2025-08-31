@@ -85,41 +85,41 @@ class ConfigManager:
                 "default_language": "zh"
             },
             "llm": {
-                # 对应Node_121343配置
+                # 对应Node_121343配置 - 使用DeepSeek v3.1
                 "script_generation": {
-                    "model": "deepseek-v3",
+                    "model": "deepseek/deepseek-chat-v3.1",
                     "temperature": 0.8,
                     "max_tokens": 1024,
                     "api_base": "${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}",
                     "api_key": "${OPENROUTER_API_KEY}"
                 },
-                # 对应Node_1199098配置  
+                # 对应Node_1199098配置 - 使用DeepSeek v3.1  
                 "theme_extraction": {
-                    "model": "deepseek-v3",
+                    "model": "deepseek/deepseek-chat-v3.1",
                     "temperature": 1.0,
                     "max_tokens": 512,
                     "api_base": "${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}",
                     "api_key": "${OPENROUTER_API_KEY}"
                 },
-                # 对应Node_1165778配置
+                # 对应Node_1165778配置 - 使用DeepSeek v3.1
                 "scene_splitting": {
-                    "model": "deepseek-v3", 
+                    "model": "deepseek/deepseek-chat-v3.1", 
                     "temperature": 0.8,
                     "max_tokens": 8192,
                     "api_base": "${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}",
                     "api_key": "${OPENROUTER_API_KEY}"
                 },
-                # 对应Node_186126配置
-                "image_prompts": {
-                    "model": "deepseek-v3",  # 原为deepseek-v3-0324，统一使用v3
+                # 对应Node_186126配置 - 使用DeepSeek v3.1
+                "image_prompt_generation": {
+                    "model": "deepseek/deepseek-chat-v3.1",
                     "temperature": 1.0,
                     "max_tokens": 16384,
                     "api_base": "${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}",
                     "api_key": "${OPENROUTER_API_KEY}"
                 },
-                # 对应Node_1301843配置
+                # 对应Node_1301843配置 - 使用DeepSeek v3.1
                 "character_analysis": {
-                    "model": "deepseek-v3",
+                    "model": "deepseek/deepseek-chat-v3.1",
                     "temperature": 0.8, 
                     "max_tokens": 8192,
                     "api_base": "${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}",
@@ -147,14 +147,14 @@ class ConfigManager:
                 }
             },
             "video": {
-                "resolution": "1440x1080",  # 对应原工作流草稿尺寸
+                "resolution": "720x1280",  # 移动端竖屏视频标准分辨率
                 "fps": 30,
                 "format": "mp4",
                 "enable_subtitles": True,
                 "enable_keyframes": True
             },
             "subtitle": {
-                "max_line_length": 25,  # 对应原工作流SUB_CONFIG.MAX_LINE_LENGTH
+                "max_line_length": 18,  # 移动端优化配置
                 "split_priority": ["。","！","？","，",",","：",":","、","；",";"," "],
                 "main_font_size": 7,  # 对应Node_158201配置
                 "title_font_size": 40,  # 对应Node_1182713配置
@@ -296,7 +296,7 @@ class ConfigManager:
         video_config = self.get('video', {})
         
         return VideoConfig(
-            resolution=video_config.get('resolution', '1440x1080'),
+            resolution=video_config.get('resolution', '720x1280'),
             fps=video_config.get('fps', 30),
             format=video_config.get('format', 'mp4')
         )

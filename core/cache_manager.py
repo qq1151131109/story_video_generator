@@ -51,7 +51,10 @@ class CacheManager:
             'images': self.cache_dir / 'images',
             'audio': self.cache_dir / 'audio',
             'prompts': self.cache_dir / 'prompts',
+            'image_prompts': self.cache_dir / 'image_prompts',
             'characters': self.cache_dir / 'characters',
+            'character_images': self.cache_dir / 'character_images',
+            'cutout': self.cache_dir / 'cutout',
             'themes': self.cache_dir / 'themes'
         }
         

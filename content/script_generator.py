@@ -12,8 +12,9 @@ import openai
 from dataclasses import dataclass
 
 from core.config_manager import ConfigManager, ModelConfig
-from core.cache_manager import CacheManager
+# 缓存已删除
 from utils.file_manager import FileManager
+from utils.llm_client_manager import LLMClientManager
 
 @dataclass
 class ScriptGenerationRequest:
@@ -47,9 +48,9 @@ class ScriptGenerator:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager: CacheManager, file_manager: FileManager):
+                 cache_manager, file_manager: FileManager):
         self.config = config_manager
-        self.cache = cache_manager
+        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
@@ -59,20 +60,12 @@ class ScriptGenerator:
         # 获取LLM配置
         self.llm_config = self.config.get_llm_config('script_generation')
         
-        # 配置OpenAI客户端
-        self._setup_openai_client()
+        # 初始化多提供商LLM客户端管理器
+        self.llm_manager = LLMClientManager(config_manager)
         
         # 加载提示词模板
         self._load_prompt_templates()
     
-    def _setup_openai_client(self):
-        """配置OpenAI客户端"""
-        self.client = openai.AsyncOpenAI(
-            api_key=self.llm_config.api_key,
-            base_url=self.llm_config.api_base
-        )
-        
-        self.logger.info(f"Initialized OpenAI client for {self.llm_config.name}")
     
     def _load_prompt_templates(self):
         """加载提示词模板"""
@@ -174,19 +167,7 @@ Por favor, crea una historia histórica basada en el siguiente tema:
         start_time = time.time()
         
         try:
-            # 检查缓存
-            cache_key = self.cache.get_cache_key({
-                'theme': request.theme,
-                'language': request.language,
-                'style': request.style,
-                'target_length': request.target_length
-            })
-            
-            cached_result = self.cache.get('scripts', cache_key)
-            if cached_result:
-                self.logger.info(f"Cache hit for script generation: {request.language}/{request.theme[:20]}...")
-                cached_result['generation_time'] = time.time() - start_time
-                return GeneratedScript(**cached_result)
+            # 缓存已禁用 - 每次都生成新内容
             
             # 验证请求
             if request.language not in self.supported_languages:
@@ -231,7 +212,7 @@ Por favor, crea una historia histórica basada en el siguiente tema:
                 'model_used': result.model_used
             }
             
-            self.cache.set('scripts', cache_key, cache_data)
+            # 缓存已禁用
             
             # 记录日志
             logger = self.config.get_logger('story_generator')
@@ -256,7 +237,7 @@ Por favor, crea una historia histórica basada en el siguiente tema:
     
     async def _call_llm_api(self, prompt: str) -> str:
         """
-        调用LLM API
+        使用fallback机制调用LLM API
         
         Args:
             prompt: 提示词
@@ -265,19 +246,15 @@ Por favor, crea una historia histórica basada en el siguiente tema:
             str: LLM响应
         """
         try:
-            response = await self.client.chat.completions.create(
-                model=self.llm_config.name,
-                messages=[{
-                    "role": "user", 
-                    "content": prompt
-                }],
+            content = await self.llm_manager.call_llm_with_fallback(
+                prompt=prompt,
+                task_type='script_generation',
                 temperature=self.llm_config.temperature,
                 max_tokens=self.llm_config.max_tokens
             )
             
-            content = response.choices[0].message.content
             if not content:
-                raise ValueError("Empty response from LLM")
+                raise ValueError("Empty response from all LLM providers")
             
             return content.strip()
             
@@ -336,22 +313,42 @@ Por favor, crea una historia histórica basada en el siguiente tema:
         return title, content
     
     def _clean_content(self, content: str) -> str:
-        """清理生成的内容"""
+        """清理生成的内容，移除结构标识词"""
         # 移除多余的空行
         lines = [line.strip() for line in content.split('\n') if line.strip()]
+        
+        # 结构标识词列表（需要过滤的词语）
+        structure_keywords = [
+            '悬念开场', '身份代入', '冲突升级', '破局细节', '主题收尾',
+            '开场', '结尾', '总结', '段落', '第一部分', '第二部分',
+            '**', '###', '##', '#', '创作要求', '写作技巧', '内容要求'
+        ]
         
         # 移除可能的标记或格式符号
         cleaned_lines = []
         for line in lines:
             # 跳过纯标记行
-            if line.startswith('---') or line.startswith('==='):
+            if line.startswith('---') or line.startswith('===') or line.startswith('**'):
                 continue
+            
+            # 检查是否包含结构标识词
+            contains_structure_keyword = any(keyword in line for keyword in structure_keywords)
+            if contains_structure_keyword:
+                self.logger.warning(f"Filtered out structure keyword in line: {line[:30]}...")
+                continue
+            
             # 清理行首的标记
-            line = line.lstrip('- ').lstrip('* ').lstrip('> ')
-            if line:
+            line = line.lstrip('- ').lstrip('* ').lstrip('> ').lstrip('1234567890. ')
+            if line and len(line) > 3:  # 过滤过短的行
                 cleaned_lines.append(line)
         
-        return '\n'.join(cleaned_lines)
+        cleaned_content = '\n'.join(cleaned_lines)
+        
+        # 最后检查：如果内容过短或仍包含结构标识，返回警告
+        if len(cleaned_content) < 100:
+            self.logger.warning("Generated content too short after cleaning, may need regeneration")
+        
+        return cleaned_content
     
     def generate_script_sync(self, request: ScriptGenerationRequest) -> GeneratedScript:
         """
@@ -406,11 +403,9 @@ Por favor, crea una historia histórica basada en el siguiente tema:
     
     def get_generation_stats(self) -> Dict[str, Any]:
         """获取生成统计信息"""
-        cache_stats = self.cache.get_cache_stats()
         
         return {
             'supported_languages': self.supported_languages,
-            'cache_stats': cache_stats.get('disk_cache', {}).get('scripts', {}),
             'model_config': {
                 'name': self.llm_config.name,
                 'temperature': self.llm_config.temperature,

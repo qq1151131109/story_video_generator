@@ -1,11 +1,12 @@
+# 故事视频生成器 - 完整依赖
+# 安装: pip install -r requirements.txt
+
 # Core dependencies
-asyncio>=3.4.3
 aiohttp>=3.8.0
 aiofiles>=0.8.0
 
 # LLM and AI services
 openai>=1.0.0
-anthropic>=0.7.0
 
 # Image processing
 Pillow>=9.0.0
@@ -16,10 +17,6 @@ rembg>=2.0.0
 pydub>=0.25.1
 mutagen>=1.46.0
 
-# Video processing
-ffmpeg-python>=0.2.0
-moviepy>=1.0.3
-
 # Configuration and data
 python-dotenv>=0.19.0
 pydantic>=2.0.0
@@ -29,6 +26,7 @@ pydantic-settings>=2.0.0
 loguru>=0.6.0
 tqdm>=4.64.0
 click>=8.0.0
+psutil>=5.8.0
 
 # File format support
 python-magic>=0.4.24
@@ -45,3 +43,19 @@ aiosqlite>=0.17.0
 # Testing
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
+
+# WhisperX精确时间戳对齐 - 可选功能
+# 提供word-level精确字幕对齐，替代基础的TTS时间戳分割
+whisperx>=3.1.1
+
+# AI/ML框架 (WhisperX依赖)
+torch>=2.0.0
+torchaudio>=2.0.0
+transformers>=4.30.0
+
+# 音频处理 (WhisperX依赖)
+librosa>=0.9.0
+soundfile>=0.12.0
+
+# 语音对齐 (WhisperX依赖)
+phonemizer>=3.2.1

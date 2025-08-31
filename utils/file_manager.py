@@ -40,6 +40,7 @@ class FileManager:
             self.output_dir / "audio",        # 音频输出
             self.output_dir / "videos",       # 视频输出
             self.output_dir / "subtitles",    # 字幕输出
+            self.output_dir / "manifests",    # 媒体清单输出
             self.output_dir / "cache",        # 缓存目录
             self.output_dir / "logs",         # 日志目录
             self.temp_dir / "images",         # 临时图片
@@ -211,6 +212,7 @@ class FileManager:
             'audio': self.output_dir / "audio",
             'videos': self.output_dir / "videos",
             'subtitles': self.output_dir / "subtitles",
+            'manifests': self.output_dir / "manifests",
             'logs': self.output_dir / "logs",
             'temp': self.output_dir / "temp"
         }

@@ -31,6 +31,7 @@ class ImageGenerationRequest:
     quality: str = "high"         # 质量 (high, standard)
     steps: int = 40               # 采样步数
     model_id: Optional[int] = 8   # 模型ID（RunningHub）
+    scene_id: Optional[str] = None # 场景唯一标识符（防止图像重复）
 
 @dataclass
 class GeneratedImage:
@@ -44,6 +45,7 @@ class GeneratedImage:
     model: str                    # 使用的模型
     generation_time: float        # 生成耗时
     file_path: Optional[str] = None  # 保存的文件路径
+    remote_url: Optional[str] = None  # 远程URL（用于抠图等后续处理）
 
 class ImageGenerator:
     """
@@ -56,9 +58,9 @@ class ImageGenerator:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager: CacheManager, file_manager: FileManager):
+                 cache_manager, file_manager: FileManager):
         self.config = config_manager
-        self.cache = cache_manager
+        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.media')
         
@@ -107,21 +109,7 @@ class ImageGenerator:
         start_time = time.time()
         
         try:
-            # 检查缓存
-            cache_key = self.cache.get_cache_key({
-                'prompt': request.prompt,
-                'negative_prompt': request.negative_prompt,
-                'width': request.width,
-                'height': request.height,
-                'style': request.style,
-                'steps': request.steps
-            })
-            
-            cached_result = self.cache.get('images', cache_key)
-            if cached_result:
-                self.logger.info(f"Cache hit for image generation: {request.prompt[:50]}...")
-                cached_result['generation_time'] = time.time() - start_time
-                return GeneratedImage(**cached_result)
+            # 缓存已禁用 - 每次都生成新图像
             
             # 构建完整提示词
             full_prompt = self._build_full_prompt(request)
@@ -158,7 +146,7 @@ class ImageGenerator:
                         'model': result.model
                     }
                     
-                    self.cache.set('images', cache_key, cache_data)
+                    # 缓存已禁用
                     
                     # 记录日志
                     # 保存图像文件
@@ -295,10 +283,13 @@ class ImageGenerator:
                                                         outputs = outputs_result.get('data', [])
                                                         
                                                         # 寻找图像URL
-                                                        for item in outputs:
+                                                        self.logger.debug(f"Processing outputs: {outputs}")
+                                                        for i, item in enumerate(outputs):
+                                                            self.logger.debug(f"Output item {i}: {type(item)}, {item}")
                                                             if isinstance(item, dict) and 'fileUrl' in item:
                                                                 image_url = item['fileUrl']
                                                                 self.logger.info(f"Found image URL: {image_url}")
+                                                                self.logger.info(f"Setting remote_url to: {item['fileUrl']}")
                                                                 
                                                                 # 下载真实图像
                                                                 async with session.get(image_url) as img_response:
@@ -313,7 +304,8 @@ class ImageGenerator:
                                                                             file_size=len(image_data),
                                                                             provider='runninghub',
                                                                             model=f"flux_task_{task_id}",
-                                                                            generation_time=time.time() - start_time
+                                                                            generation_time=time.time() - start_time,
+                                                                            remote_url=item['fileUrl'] if isinstance(item, dict) and 'fileUrl' in item else (item if isinstance(item, str) else None)
                                                                         )
                                                             elif isinstance(item, str) and item.startswith('http'):
                                                                 # 处理字符串格式的URL
@@ -329,7 +321,8 @@ class ImageGenerator:
                                                                             file_size=len(image_data),
                                                                             provider='runninghub',
                                                                             model=f"flux_task_{task_id}",
-                                                                            generation_time=time.time() - start_time
+                                                                            generation_time=time.time() - start_time,
+                                                                            remote_url=item['fileUrl'] if isinstance(item, dict) and 'fileUrl' in item else (item if isinstance(item, str) else None)
                                                                         )
                                                         
                                                         # 如果没有找到图像URL，记录警告
@@ -418,7 +411,8 @@ class ImageGenerator:
                     file_size=len(image_data),
                     provider='openai',
                     model='openai/dall-e-3',
-                    generation_time=time.time() - start_time
+                    generation_time=time.time() - start_time,
+                    remote_url=None  # OpenAI不提供持久化URL
                 )
     
     async def _generate_with_stability(self, request: ImageGenerationRequest, 
@@ -475,7 +469,8 @@ class ImageGenerator:
                     file_size=len(image_data),
                     provider='stability',
                     model='stable-diffusion-v1-6',
-                    generation_time=time.time() - start_time
+                    generation_time=time.time() - start_time,
+                    remote_url=None  # Stability AI不提供持久化URL
                 )
     
     def generate_image_sync(self, request: ImageGenerationRequest, 
@@ -493,7 +488,7 @@ class ImageGenerator:
         return asyncio.run(self.generate_image_async(request, provider))
     
     async def batch_generate_images(self, requests: List[ImageGenerationRequest], 
-                                  max_concurrent: int = 3) -> List[GeneratedImage]:
+                                  max_concurrent: int = 3) -> List[Optional[GeneratedImage]]:
         """
         批量生成图像
         
@@ -516,20 +511,21 @@ class ImageGenerator:
         tasks = [generate_with_semaphore(request) for request in requests]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # 处理结果和异常
-        successful_results = []
+        # 处理结果和异常：按输入顺序返回，失败用None占位
+        ordered_results: List[Optional[GeneratedImage]] = []
         failed_count = 0
         
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 self.logger.error(f"Batch image generation failed for request {i}: {result}")
+                ordered_results.append(None)
                 failed_count += 1
             else:
-                successful_results.append(result)
+                ordered_results.append(result)
         
-        self.logger.info(f"Batch image generation completed: {len(successful_results)} successful, {failed_count} failed")
+        self.logger.info(f"Batch image generation completed: {len(requests) - failed_count} successful, {failed_count} failed")
         
-        return successful_results
+        return ordered_results
     
     def save_image(self, image: GeneratedImage, output_dir: Optional[str] = None, 
                    filename: Optional[str] = None) -> str:
@@ -604,7 +600,7 @@ class ImageGenerator:
     
     def get_generation_stats(self) -> Dict[str, Any]:
         """获取图像生成统计信息"""
-        cache_stats = self.cache.get_cache_stats()
+        # 缓存已删除
         
         return {
             'providers': {
@@ -612,7 +608,7 @@ class ImageGenerator:
                 'fallback': self.fallback_providers,
                 'available_keys': [k for k, v in self.api_keys.items() if v]
             },
-            'cache_stats': cache_stats.get('disk_cache', {}).get('images', {}),
+            # 缓存已删除
             'config': {
                 'resolution': self.media_config.image_resolution,
                 'quality': self.media_config.image_quality

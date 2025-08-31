@@ -12,6 +12,7 @@ import json
 
 from core.config_manager import ConfigManager
 from utils.file_manager import FileManager
+from utils.subtitle_utils import SubtitleUtils
 
 @dataclass
 class SubtitleSegment:
@@ -55,8 +56,10 @@ class SubtitleProcessor:
             "。", "！", "？", "，", ",", "：", ":", "、", "；", ";", " "
         ])
         
-        # 最大行长度
-        self.max_line_length = self.subtitle_config.get('max_line_length', 25)
+        # 最大文本宽度 - 使用统一配置
+        self.max_text_width = self.subtitle_config.get('max_text_width', 640)
+        self.video_width = self.subtitle_config.get('video_width', 720)
+        self.safe_margin = self.subtitle_config.get('safe_margin', 40)
         
         # 字幕样式配置
         self._load_subtitle_styles()
@@ -125,7 +128,7 @@ class SubtitleProcessor:
     
     def _split_text_intelligently(self, text: str, language: str) -> List[str]:
         """
-        智能分割文本
+        智能分割文本 - 使用统一工具类
         
         Args:
             text: 原始文本
@@ -134,45 +137,10 @@ class SubtitleProcessor:
         Returns:
             List[str]: 分割后的文本片段
         """
-        if len(text) <= self.max_line_length:
-            return [text]
-        
-        segments = []
-        remaining_text = text.strip()
-        
-        while remaining_text:
-            if len(remaining_text) <= self.max_line_length:
-                segments.append(remaining_text)
-                break
-            
-            # 尝试按优先级分割
-            best_split_pos = -1
-            best_split_char = ""
-            
-            # 在最大长度范围内寻找最佳分割点
-            search_end = min(self.max_line_length, len(remaining_text))
-            
-            for i in range(search_end, 0, -1):
-                char = remaining_text[i-1]
-                if char in self.split_priority:
-                    priority = self.split_priority.index(char)
-                    if best_split_pos == -1 or priority < self.split_priority.index(best_split_char):
-                        best_split_pos = i
-                        best_split_char = char
-            
-            if best_split_pos > 0:
-                # 找到了合适的分割点
-                segment = remaining_text[:best_split_pos].strip()
-                if segment:
-                    segments.append(segment)
-                remaining_text = remaining_text[best_split_pos:].strip()
-            else:
-                # 没有找到分割点，强制在最大长度处分割
-                segment = remaining_text[:self.max_line_length].strip()
-                segments.append(segment)
-                remaining_text = remaining_text[self.max_line_length:].strip()
-        
-        return [seg for seg in segments if seg]
+        # 使用动态计算的最大字符数（估算值）
+        max_chars = int(self.max_text_width / self.subtitle_config.get('font_size', 48) * 1.2)
+        max_chars = max(8, min(max_chars, 16))  # 限制在合理范围
+        return SubtitleUtils.split_text_by_rules(text, max_chars, language)
     
     def _assign_timing(self, text_segments: List[str], total_duration: float) -> List[SubtitleSegment]:
         """
@@ -245,13 +213,8 @@ class SubtitleProcessor:
         return '\n'.join(srt_content)
     
     def _format_srt_time(self, seconds: float) -> str:
-        """格式化SRT时间"""
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = int(seconds % 60)
-        milliseconds = int((seconds % 1) * 1000)
-        
-        return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
+        """格式化SRT时间 - 使用统一工具类"""
+        return SubtitleUtils.format_srt_time(seconds)
     
     def generate_ass(self, segments: List[SubtitleSegment]) -> str:
         """
@@ -290,12 +253,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return '\n'.join(ass_content)
     
     def _format_ass_time(self, seconds: float) -> str:
-        """格式化ASS时间"""
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = seconds % 60
-        
-        return f"{hours:01d}:{minutes:02d}:{secs:05.2f}"
+        """格式化ASS时间 - 使用统一工具类"""
+        return SubtitleUtils.format_ass_time(seconds)
     
     def generate_vtt(self, segments: List[SubtitleSegment]) -> str:
         """
@@ -321,15 +280,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return '\n'.join(vtt_content)
     
     def _format_vtt_time(self, seconds: float) -> str:
-        """格式化WebVTT时间"""
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = seconds % 60
-        
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
-        else:
-            return f"{minutes:02d}:{secs:06.3f}"
+        """格式化WebVTT时间 - 使用统一工具类"""
+        return SubtitleUtils.format_vtt_time(seconds)
     
     def save_subtitle_file(self, segments: List[SubtitleSegment], 
                           output_path: str, format: str = "srt") -> str:
@@ -420,4 +372,4 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     
     def __str__(self) -> str:
         """字符串表示"""
-        return f"SubtitleProcessor(max_line_length={self.max_line_length})"
+        return f"SubtitleProcessor(max_text_width={self.max_text_width}px)"

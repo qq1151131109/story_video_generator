@@ -77,7 +77,7 @@ def update_llm_config():
     
     # 更新所有LLM配置项
     llm_tasks = ['script_generation', 'theme_extraction', 'scene_splitting', 
-                 'image_prompts', 'character_analysis']
+                 'image_prompt_generation', 'character_analysis']
     
     for task in llm_tasks:
         if task in config['llm']:

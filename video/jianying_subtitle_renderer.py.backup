@@ -1,0 +1,477 @@
+"""
+剪映风格字幕渲染器
+支持半透明背景框、白色字体、底部居中定位等剪映常用样式
+"""
+import os
+import re
+import time
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
+import logging
+from PIL import Image, ImageDraw, ImageFont
+
+from core.config_manager import ConfigManager
+from utils.file_manager import FileManager
+
+
+@dataclass
+class JianyingSubtitle:
+    """剪映风格字幕段"""
+    text: str
+    start_time: float  # 秒
+    end_time: float    # 秒
+    duration: float    # 秒
+    
+    def to_drawtext_time_range(self) -> str:
+        """转换为FFmpeg drawtext的时间表达式"""
+        # FFmpeg时间表达式: enable='between(t,start,end)'
+        return f"between(t,{self.start_time:.3f},{self.end_time:.3f})"
+
+
+class JianyingSubtitleRenderer:
+    """
+    剪映风格字幕渲染器
+    
+    实现剪映/抖音常用的字幕样式：
+    - 半透明黑色背景框
+    - 白色无衬线字体
+    - 底部居中定位  
+    - 适当的边距和描边
+    """
+    
+    def __init__(self, config_manager: ConfigManager, file_manager: FileManager):
+        self.config = config_manager
+        self.file_manager = file_manager
+        self.logger = logging.getLogger('story_generator.video')
+        
+        # 加载剪映风格配置
+        self.jianying_config = self._load_jianying_config()
+        
+        # 系统字体路径检测
+        self.font_path = self._detect_system_font()
+        
+        # 初始化字体测量工具
+        self._init_font_measurement()
+        
+    def _load_jianying_config(self) -> Dict[str, Any]:
+        """加载剪映风格配置 - 从统一配置文件读取"""
+        # 从 ConfigManager 获取统一的字幕配置
+        subtitle_config = self.config.get('subtitle', {})
+        
+        return {
+            # 字体配置（从配置文件读取）
+            "font_size": subtitle_config.get('main_font_size', 48),
+            "font_color": subtitle_config.get('main_color', '#FFFFFF').replace('#', ''),
+            "font_family": "思源黑体",
+            
+            # 描边配置
+            "border_width": subtitle_config.get('outline', 3),
+            "border_color": subtitle_config.get('main_border_color', '#000000').replace('#', ''),
+            
+            # 阴影效果
+            "shadow_enabled": True,
+            "shadow_x": 1,
+            "shadow_y": 1,
+            "shadow_color": "black@0.5",
+            
+            # 背景框配置
+            "box_enabled": True,
+            "box_color": "black@0.7",
+            "box_border_width": 12,
+            
+            # 位置配置（使用统一配置）
+            "position_x": "(w-text_w)/2",
+            "position_y": f"h-text_h-{subtitle_config.get('margin_v', 80)}",
+            
+            # 动画配置
+            "fade_duration": 0.2,
+            "enable_fade": True,
+            
+            # 文本处理（从统一配置读取）
+            "video_width": subtitle_config.get('video_width', 720),
+            "video_height": subtitle_config.get('video_height', 1280),
+            "safe_margin": subtitle_config.get('safe_margin', 40),
+            "max_text_width": subtitle_config.get('max_text_width', 640),
+            "max_lines": subtitle_config.get('max_lines', 2),
+            "line_spacing": 1.2,
+        }
+    
+    def _detect_system_font(self) -> Optional[str]:
+        """检测系统中可用的中文字体"""
+        # 常见中文字体路径（按优先级排序）
+        font_candidates = [
+            # Linux系统字体
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/truetype/arphic/uming.ttc",
+            
+            # Windows系统字体（如果在WSL中）
+            "/mnt/c/Windows/Fonts/msyh.ttc",  # 微软雅黑
+            "/mnt/c/Windows/Fonts/simsun.ttc", # 宋体
+            
+            # macOS系统字体  
+            "/System/Library/Fonts/PingFang.ttc",  # 苹方
+            "/System/Library/Fonts/STHeiti Light.ttc", # 黑体
+        ]
+        
+        for font_path in font_candidates:
+            if os.path.exists(font_path):
+                self.logger.info(f"Using font: {font_path}")
+                return font_path
+        
+        # 如果没有找到中文字体，使用系统默认
+        self.logger.warning("No Chinese font found, using system default")
+        return None
+    
+    def _init_font_measurement(self):
+        """初始化字体宽度测量工具"""
+        try:
+            if self.font_path and os.path.exists(self.font_path):
+                self.pil_font = ImageFont.truetype(self.font_path, self.jianying_config["font_size"])
+            else:
+                self.pil_font = ImageFont.load_default()
+            self.logger.info("Font measurement initialized successfully")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize font measurement: {e}")
+            self.pil_font = ImageFont.load_default()
+    
+    def _measure_text_width(self, text: str) -> int:
+        """精确测量文本宽度（像素）"""
+        try:
+            # 创建临时图像用于测量
+            temp_img = Image.new('RGB', (1000, 200), color='black')
+            draw = ImageDraw.Draw(temp_img)
+            
+            # 测量文本边界框
+            bbox = draw.textbbox((0, 0), text, font=self.pil_font)
+            width = bbox[2] - bbox[0]
+            
+            return width
+        except Exception as e:
+            self.logger.error(f"Text width measurement failed: {e}")
+            # 备用估算：中文字符按字体大小，英文字符按字体大小的60%
+            chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
+            other_chars = len(text) - chinese_chars
+            estimated_width = (chinese_chars * self.jianying_config["font_size"] + 
+                             other_chars * self.jianying_config["font_size"] * 0.6)
+            return int(estimated_width)
+    
+    def _calculate_max_chars_per_line(self) -> int:
+        """动态计算每行最大字符数"""
+        config = self.jianying_config
+        max_width = config["max_text_width"]
+        
+        # 使用典型中文字符测量
+        test_text = "测试字符宽度计算"
+        avg_char_width = self._measure_text_width(test_text) / len(test_text)
+        
+        max_chars = int(max_width / avg_char_width * 0.9)  # 90%安全系数
+        
+        # 限制在合理范围内
+        max_chars = max(8, min(max_chars, 20))
+        
+        self.logger.info(f"Calculated max chars per line: {max_chars} (avg_char_width: {avg_char_width:.1f}px)")
+        return max_chars
+    
+    def _clean_text_for_ffmpeg(self, text: str) -> str:
+        """清理文本，确保FFmpeg兼容性"""
+        # 先统一换行符格式，处理字面量\n符号
+        text = text.replace('\\n', '\n')     # 将字面量\n转换为实际换行符
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # 清理特殊符号但保留基本中文标点和换行符
+        text = re.sub(r'[^\w\s\u4e00-\u9fff，。！？、；：""''（）\n]', '', text)
+        return text.strip()
+    
+    def _smart_text_wrap(self, text: str, max_line_length: int = None, max_lines: int = None) -> List[str]:
+        """智能文本换行（精确宽度控制）"""
+        if max_line_length is None:
+            max_line_length = self._calculate_max_chars_per_line()
+        if max_lines is None:
+            max_lines = self.jianying_config["max_lines"]
+        
+        config = self.jianying_config
+        max_width = config["max_text_width"]
+        
+        # 首先处理已有的换行符
+        if '\n' in text:
+            existing_lines = text.split('\n')
+            result_lines = []
+            
+            for line in existing_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                # 检查实际宽度
+                if self._measure_text_width(line) <= max_width:
+                    result_lines.append(line)
+                else:
+                    # 对过宽的行进行智能分割
+                    wrapped_lines = self._wrap_by_width(line, max_width)
+                    result_lines.extend(wrapped_lines)
+                
+                if len(result_lines) >= max_lines:
+                    result_lines = result_lines[:max_lines]
+                    break
+            
+            return result_lines
+        else:
+            # 没有换行符的文本，直接智能分行
+            if self._measure_text_width(text) <= max_width:
+                return [text]
+            return self._wrap_by_width(text, max_width, max_lines)
+    
+    def _wrap_by_width(self, text: str, max_width: int, max_lines: int = None) -> List[str]:
+        """按实际宽度进行文本换行"""
+        if max_lines is None:
+            max_lines = self.jianying_config["max_lines"]
+            
+        lines = []
+        current_text = text.strip()
+        
+        while current_text and len(lines) < max_lines:
+            # 从最长可能的文本开始检查
+            best_split = len(current_text)
+            
+            # 二分查找最佳分割点
+            left, right = 0, len(current_text)
+            
+            while left < right:
+                mid = (left + right + 1) // 2
+                test_text = current_text[:mid]
+                
+                if self._measure_text_width(test_text) <= max_width:
+                    left = mid
+                else:
+                    right = mid - 1
+            
+            split_pos = left
+            
+            # 在合适的标点处断句
+            if split_pos < len(current_text):
+                # 在split_pos之前查找最近的标点
+                for i in range(split_pos, max(0, split_pos - 8), -1):
+                    if current_text[i] in '。！？，、；： ':
+                        split_pos = i + 1
+                        break
+            
+            line_text = current_text[:split_pos].strip()
+            if line_text:
+                lines.append(line_text)
+            
+            current_text = current_text[split_pos:].strip()
+        
+        # 如果还有剩余文本且已达到最大行数，加省略号
+        if current_text and lines and len(lines) == max_lines:
+            last_line = lines[-1]
+            if self._measure_text_width(last_line + "...") <= max_width:
+                lines[-1] = last_line + "..."
+            else:
+                # 截断最后一行并添加省略号
+                while last_line and self._measure_text_width(last_line + "...") > max_width:
+                    last_line = last_line[:-1]
+                lines[-1] = last_line + "..."
+        
+        return lines
+    
+    def _split_text_to_lines(self, text: str) -> List[str]:
+        """将文本按剪映风格分行（精确宽度控制）"""
+        return self._smart_text_wrap(text)
+    
+    def create_drawtext_filter(self, subtitle: JianyingSubtitle) -> str:
+        """创建单个字幕的FFmpeg drawtext滤镜 - 支持智能换行"""
+        config = self.jianying_config
+        
+        # 清理文本
+        clean_text = self._clean_text_for_ffmpeg(subtitle.text)
+        
+        # 智能分行处理（使用精确宽度测量）
+        lines = self._smart_text_wrap(clean_text)
+        display_text = '\n'.join(lines)  # 使用真正的换行符
+        
+        # 构建基础drawtext参数
+        drawtext_params = []
+        
+        # 字体配置
+        if self.font_path:
+            drawtext_params.append(f"fontfile='{self.font_path}'")
+        # 对文本进行FFmpeg特殊字符处理（保留\n换行符）
+        escaped_text = display_text.replace("'", "\\'").replace(":", "\\:")
+        drawtext_params.append(f"text='{escaped_text}'")
+        drawtext_params.append(f"fontsize={config['font_size']}")
+        drawtext_params.append(f"fontcolor={config['font_color']}")
+        
+        # 描边配置（增强版）
+        drawtext_params.append(f"borderw={config['border_width']}")
+        drawtext_params.append(f"bordercolor={config['border_color']}")
+        
+        # 阴影效果（热门字幕特效）
+        if config.get("shadow_enabled", False):
+            drawtext_params.append(f"shadowx={config['shadow_x']}")
+            drawtext_params.append(f"shadowy={config['shadow_y']}")
+            drawtext_params.append(f"shadowcolor={config['shadow_color']}")
+        
+        # 背景框配置（剪映风格关键特性）
+        if config["box_enabled"]:
+            drawtext_params.append("box=1")
+            drawtext_params.append(f"boxcolor={config['box_color']}")
+            drawtext_params.append(f"boxborderw={config['box_border_width']}")
+        
+        # 位置配置（防止左右超出画面）
+        drawtext_params.append(f"x={config['position_x']}")
+        drawtext_params.append(f"y={config['position_y']}")
+        
+        # 注释：文本宽度通过智能换行控制，FFmpeg drawtext没有text_w参数
+        
+        # 时间控制
+        time_expr = subtitle.to_drawtext_time_range()
+        
+        # 淡入淡出效果
+        if config["enable_fade"]:
+            fade_dur = config["fade_duration"]
+            # alpha淡入淡出表达式
+            alpha_expr = (
+                f"'if(lt(t,{subtitle.start_time:.3f}+{fade_dur}), "
+                f"(t-{subtitle.start_time:.3f})/{fade_dur}, "
+                f"if(gt(t,{subtitle.end_time:.3f}-{fade_dur}), "
+                f"({subtitle.end_time:.3f}-t)/{fade_dur}, 1))'"
+            )
+            drawtext_params.append(f"alpha={alpha_expr}")
+        
+        # 启用时间控制
+        drawtext_params.append(f"enable='{time_expr}'")
+        
+        return "drawtext=" + ":".join(drawtext_params)
+    
+    def create_subtitle_filter_chain(self, subtitles: List[JianyingSubtitle]) -> str:
+        """创建完整的字幕滤镜链"""
+        if not subtitles:
+            return ""
+        
+        # 为每个字幕创建drawtext滤镜
+        drawtext_filters = []
+        for subtitle in subtitles:
+            filter_str = self.create_drawtext_filter(subtitle)
+            drawtext_filters.append(filter_str)
+        
+        if not drawtext_filters:
+            return ""
+        
+        # 构建滤镜链: [0:v]drawtext1,drawtext2,drawtext3...[v]
+        filter_chain = ",".join(drawtext_filters)
+        return f"[0:v]{filter_chain}[v]"
+    
+    def convert_srt_to_jianying_subtitles(self, srt_file: str) -> List[JianyingSubtitle]:
+        """将SRT字幕文件转换为剪映风格字幕对象"""
+        subtitles = []
+        
+        try:
+            with open(srt_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 解析SRT格式
+            srt_pattern = r'(\d+)\s*\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\s*\n(.*?)\n\n'
+            matches = re.findall(srt_pattern, content, re.DOTALL)
+            
+            for match in matches:
+                sequence, start_time_str, end_time_str, text = match
+                
+                # 解析时间
+                start_time = self._parse_srt_time(start_time_str)
+                end_time = self._parse_srt_time(end_time_str)
+                duration = end_time - start_time
+                
+                # 清理文本 - 保留换行符，让智能分行处理
+                clean_text = text.strip()
+                
+                subtitle = JianyingSubtitle(
+                    text=clean_text,
+                    start_time=start_time,
+                    end_time=end_time,
+                    duration=duration
+                )
+                subtitles.append(subtitle)
+            
+            self.logger.info(f"Converted {len(subtitles)} SRT subtitles to Jianying style")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to convert SRT to Jianying subtitles: {e}")
+        
+        return subtitles
+    
+    def _parse_srt_time(self, time_str: str) -> float:
+        """解析SRT时间格式为秒数"""
+        # 格式: "00:02:30,500"
+        time_parts = time_str.replace(',', '.').split(':')
+        hours = int(time_parts[0])
+        minutes = int(time_parts[1])
+        seconds = float(time_parts[2])
+        
+        return hours * 3600 + minutes * 60 + seconds
+    
+    def apply_jianying_subtitles_to_video(self, input_video: str, srt_file: str, 
+                                        output_video: str) -> bool:
+        """将剪映风格字幕应用到视频"""
+        try:
+            # 转换字幕
+            jianying_subtitles = self.convert_srt_to_jianying_subtitles(srt_file)
+            
+            if not jianying_subtitles:
+                self.logger.warning("No subtitles to apply")
+                return False
+            
+            # 创建滤镜链
+            filter_chain = self.create_subtitle_filter_chain(jianying_subtitles)
+            
+            if not filter_chain:
+                self.logger.error("Failed to create subtitle filter chain")
+                return False
+            
+            # 构建FFmpeg命令
+            ffmpeg_cmd = [
+                'ffmpeg', '-i', input_video,
+                '-vf', filter_chain,
+                '-c:a', 'copy',  # 保持音频不变
+                '-c:v', 'libx264',  # 视频重新编码
+                '-preset', 'fast',
+                '-y', output_video
+            ]
+            
+            self.logger.info(f"Applying Jianying subtitles with FFmpeg...")
+            self.logger.debug(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
+            
+            # 执行FFmpeg命令
+            import subprocess
+            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                self.logger.info(f"Successfully applied Jianying subtitles: {output_video}")
+                return True
+            else:
+                self.logger.error(f"FFmpeg failed: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Failed to apply Jianying subtitles: {e}")
+            return False
+    
+    def get_style_info(self) -> Dict[str, Any]:
+        """获取当前剪映风格配置信息"""
+        return {
+            "style_name": "剪映风格",
+            "features": [
+                "半透明黑色背景框",
+                "白色无衬线字体",
+                "底部居中定位",
+                "淡入淡出动画",
+                "移动端优化分行"
+            ],
+            "config": self.jianying_config,
+            "font_path": self.font_path
+        }
+    
+    def __str__(self) -> str:
+        return f"JianyingSubtitleRenderer(font={self.font_path}, style=剪映风格)"

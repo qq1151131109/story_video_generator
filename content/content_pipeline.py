@@ -46,16 +46,16 @@ class ContentPipeline:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager: CacheManager, file_manager: FileManager):
+                 cache_manager, file_manager: FileManager):
         self.config = config_manager
-        self.cache = cache_manager
+        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
         # 初始化各个组件
-        self.script_generator = ScriptGenerator(config_manager, cache_manager, file_manager)
-        self.scene_splitter = SceneSplitter(config_manager, cache_manager, file_manager)
-        self.character_analyzer = CharacterAnalyzer(config_manager, cache_manager, file_manager)
+        self.script_generator = ScriptGenerator(config_manager, None, file_manager)
+        self.scene_splitter = SceneSplitter(config_manager, None, file_manager)
+        self.character_analyzer = CharacterAnalyzer(config_manager, None, file_manager)
         
         # 支持的语言
         self.supported_languages = config_manager.get_supported_languages()
@@ -91,10 +91,11 @@ class ContentPipeline:
             # 步骤2和3：并行执行场景分割和角色分析
             self.logger.info("Step 2&3: Splitting scenes and analyzing characters...")
             
-            # 场景分割请求
+            # 场景分割请求 - 使用Coze工作流规则
             scene_request = SceneSplitRequest(
                 script_content=script_result.content,
                 language=request.language,
+                use_coze_rules=True,  # 启用原工作流分割规则
                 target_scene_count=request.target_scene_count,
                 scene_duration=request.scene_duration
             )
@@ -266,7 +267,7 @@ class ContentPipeline:
                 'scene_splitter': self.scene_splitter.get_splitting_stats(),
                 'character_analyzer': self.character_analyzer.get_analysis_stats()
             },
-            'cache_stats': self.cache.get_cache_stats()
+            # 缓存已删除
         }
     
     def validate_request(self, request: ContentGenerationRequest) -> List[str]:

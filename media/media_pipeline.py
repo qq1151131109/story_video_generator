@@ -55,15 +55,15 @@ class MediaPipeline:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager: CacheManager, file_manager: FileManager):
+                 cache_manager, file_manager: FileManager):
         self.config = config_manager
-        self.cache = cache_manager
+        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.media')
         
         # 初始化生成器
-        self.image_generator = ImageGenerator(config_manager, cache_manager, file_manager)
-        self.audio_generator = AudioGenerator(config_manager, cache_manager, file_manager)
+        self.image_generator = ImageGenerator(config_manager, None, file_manager)
+        self.audio_generator = AudioGenerator(config_manager, None, file_manager)
         
         # 获取配置
         self.media_config = config_manager.get('media', {})
@@ -159,12 +159,15 @@ class MediaPipeline:
         image_requests = []
         audio_requests = []
         
-        for scene in scenes:
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        for idx, scene in enumerate(scenes, start=1):
             # 图像请求
             prompt = scene.image_prompt if scene.image_prompt else f"历史场景：{scene.content}"
             image_req = ImageGenerationRequest(
                 prompt=prompt,
-                style="ancient_horror"
+                style="ancient_horror",
+                scene_id=f"scene_{idx}_{timestamp}"
             )
             image_requests.append((scene, image_req))
             
@@ -178,16 +181,17 @@ class MediaPipeline:
         # 使用批量生成方法（带并发控制）
         max_concurrent = self.config.get('general.max_concurrent_tasks', 3)
         
-        # 批量生成图像
+        # 批量生成图像（返回与输入同序，失败为None）
         image_gen_requests = [req for _, req in image_requests]
         generated_images = await self.image_generator.batch_generate_images(
             image_gen_requests, max_concurrent
         )
         
-        # 批量生成音频  
+        # 批量生成音频（返回与输入同序，失败为None）  
         audio_gen_requests = [req for _, req in audio_requests]
+        primary_provider = self.audio_config.get('primary_provider', 'minimax')
         generated_audio = await self.audio_generator.batch_generate_audio(
-            audio_gen_requests, max_concurrent
+            audio_gen_requests, max_concurrent, provider=primary_provider
         )
         
         # 组合结果
@@ -261,15 +265,24 @@ class MediaPipeline:
         """生成标题音频"""
         self.logger.info(f"Generating title audio: {title}")
         
+        # 获取主要音频提供商
+        primary_provider = self.audio_config.get('primary_provider', 'minimax')
+        
+        # 根据提供商选择voice_id
+        if primary_provider == 'minimax':
+            voice_id = self.audio_config.get('minimax_voice', 'male-qn-qingse')
+        else:
+            voice_id = self.audio_config.get('voice_id', 'pNInz6obpgDQGcFmaJgB')
+        
         request = AudioGenerationRequest(
             text=title,
             language=language,
-            voice_id=self.audio_config.get('voice_id', ''),
+            voice_id=voice_id,
             speed=self.audio_config.get('voice_speed', 1.2),
             volume=self.audio_config.get('voice_volume', 1.0)
         )
         
-        return await self.audio_generator.generate_audio_async(request)
+        return await self.audio_generator.generate_audio_async(request, provider=primary_provider)
     
     async def _prepare_background_music(self, request: MediaGenerationRequest) -> Optional[str]:
         """准备背景音乐"""
@@ -426,7 +439,7 @@ class MediaPipeline:
                     prefix=f"media_manifest_{result.request.language}",
                     extension="json"
                 )
-                manifest_path = self.file_manager.get_output_path('videos', manifest_filename)
+                manifest_path = self.file_manager.get_output_path('manifests', manifest_filename)
             else:
                 manifest_path = Path(output_dir) / f"media_manifest_{int(time.time())}.json"
             
@@ -455,7 +468,7 @@ class MediaPipeline:
                 'image_generator': self.image_generator.get_generation_stats(),
                 'audio_generator': self.audio_generator.get_generation_stats()
             },
-            'cache_stats': self.cache.get_cache_stats(),
+            # 缓存已删除
             'config': {
                 'image': self.image_config,
                 'audio': self.audio_config
