@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # 故事视频生成器项目 - Claude Code开发指南
 
 ## 🎯 项目概述
@@ -15,7 +19,7 @@
 ├── services/                  # 服务层（v2.0新增）
 │   └── story_video_service.py # 故事视频生成服务（服务化架构）
 ├── content/                   # 内容生成模块  
-│   ├── script_generator.py    # 文案生成（DeepSeek-V3）
+│   ├── script_generator.py    # 文案生成（GPT-5）
 │   ├── scene_splitter.py      # 场景分割（8个3秒场景）
 │   ├── character_analyzer.py  # 角色分析
 │   ├── image_prompt_generator.py # 图像提示词生成
@@ -84,9 +88,9 @@ ELEVENLABS_API_KEY=your_elevenlabs_api_key    # 高质量英语语音
 
 ### 主要配置 (config/settings.json)
 - `general.max_concurrent_tasks`: 最大并发任务数（默认3）
-- `llm.script_generation`: DeepSeek-V3模型配置
+- `llm.script_generation`: GPT-5模型配置 (通过OpenRouter)
 - `media.image.primary_provider`: 主要图像生成商（runninghub）
-- `media.audio.primary_provider`: 主要音频合成商（azure）
+- `media.audio.primary_provider`: 主要音频合成商（minimax）
 
 ## 🚀 常用开发命令
 
@@ -174,7 +178,7 @@ python -c "from core.config_manager import ConfigManager; print('Config OK')"
 
 | 原Coze节点 | 对应实现 | 核心参数 |
 |-----------|----------|----------|
-| Node_121343 | ScriptGenerator | DeepSeek-V3, temp=0.8, max_tokens=1024 |
+| Node_121343 | ScriptGenerator | GPT-5, temp=0.8, max_tokens=1024 |
 | Node_1165778 | SceneSplitter | 8个场景，每个3秒 |
 | Node_1301843 | CharacterAnalyzer | 角色提取+图像提示词生成 |
 | Node_120984 | AnimationProcessor | 缩放序列 [2.0, 1.2, 1.0] |

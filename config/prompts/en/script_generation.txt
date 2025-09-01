@@ -1,39 +1,32 @@
-Based on the theme: {{theme}}, generate an immersive historical story of about 1000 words using the following structure:
+Based on the provided theme, generate an immersive historical story script following this structure:
 
-1. Suspenseful Opening (100 words): Start with a question to create suspense
-   - Begin with "Really?" or "Did you know?"
-   - Pose a shocking historical question
-   - Spark audience curiosity
+Theme: {{theme}}
 
-2. Identity Immersion (200 words): Use second person "you" to let audience embody historical figures
-   - Use "You are..." sentence patterns
-   - Describe specific historical scenes and environments
-   - Let audience feel the situation of historical characters
+1. **Suspenseful Opening**: Start with "[Dynasty/Setting] + Counter-intuitive question/statement" to spark audience interest (e.g., "Did ancient [profession] really have more [adjective] than [comparison object]?").
 
-3. Conflict Escalation (300 words): Describe the core contradictions of historical events
-   - Detail the background of historical conflicts
-   - Show the opposition of various forces
-   - Create a tense atmosphere
+2. **Identity Immersion**: Use second person "you" to describe the protagonist's identity, historical background, and deadly crisis they face (must include specific position/situation/opponents). Avoid transition phrases like "imagine" and dive directly into the theme.
 
-4. Resolution Details (300 words): Reveal details of key turning points
-   - Describe decisive historical moments
-   - Show crucial choices of characters
-   - Reveal historical turning points
+3. **Conflict Escalation**:
+   - First layer: External pressure (enemy invasion, superior oppression, natural disasters)
+   - Second layer: Internal collapse (subordinate betrayal, resource shortage, disease spread)
+   - Third layer: Moral dilemma (loyalty vs duty, massacre choice, political alignment)
 
-5. Thematic Conclusion (100 words): Highlight historical significance
-   - Summarize the impact of historical events
-   - Point out the enlightening meaning of history
-   - Give audience profound thoughts
+4. **Resolution Details**: Protagonist takes 3 progressive actions, including:
+   - Intimidation tactics (public execution/burning evidence)
+   - Psychological warfare (divide and conquer/anonymous letters)
+   - Ultimate trump card (hidden documents/leveraging power)
 
-Requirements:
-- Extensive use of sensory descriptions (visual, auditory, tactile)
-- Use short sentences to create tense rhythm
-- No more than 3 sentences per paragraph
-- Include historical professional terms
-- Emotional rendering should be in place
-- Total word count should be controlled between 900-1100 words
+5. **Thematic Conclusion**: Through the protagonist's ending (pyrrhic victory/tragic defeat), deliver a golden quote revealing historical patterns (such as "nature of power/truth of war/human weakness").
 
-Historical Background Requirements:
-- Ensure accuracy of historical facts
-- Appropriately add dramatic detail descriptions
-- Maintain the seriousness and educational significance of history
+Reference Examples:
+[Include 2-3 detailed historical narrative examples showing the dramatic structure, with vivid second-person immersion, escalating conflicts, and profound conclusions]
+
+**Requirements**:
+- Each paragraph no more than 3 sentences, use short sentences to create tense rhythm
+- Include at least 2 historical professional terms
+- Use sensory descriptions at key turning points (smell/touch/visual impact)
+- End with "At this moment you finally understand..." pattern to highlight the theme
+- Generate approximately 1000 words of narrative script
+- Script consists of long and short sentences, long sentences should be separated by commas into short sentences, each short sentence cannot exceed 19 words
+
+**Output Requirements**: Only output the narrative subtitle script, do not output any other additional content, no section explanations
