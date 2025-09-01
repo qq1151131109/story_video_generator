@@ -43,38 +43,37 @@ class LLMClientManager:
         self.logger.info(f"LLM Client Manager initialized with {len(self.providers)} providers")
     
     def _load_providers(self) -> List[LLMProvider]:
-        """从环境变量加载LLM提供商配置"""
+        """从配置文件加载LLM提供商配置"""
         providers = []
         
         # OpenRouter - 主力提供商
         if os.getenv('OPENROUTER_API_KEY'):
+            # 🔧 从配置文件读取模型而不是硬编码
+            openrouter_models = {}
+            for task in ['script_generation', 'theme_extraction', 'scene_splitting', 'image_prompt_generation', 'character_analysis']:
+                llm_config = self.config.get(f'llm.{task}', {})
+                openrouter_models[task] = llm_config.get('model', 'openai/gpt-5')
+            
             providers.append(LLMProvider(
                 name='openrouter',
                 api_key=os.getenv('OPENROUTER_API_KEY'),
                 base_url=os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
-                models={
-                    'script_generation': 'deepseek/deepseek-chat-v3.1',
-                    'theme_extraction': 'deepseek/deepseek-chat-v3.1',
-                    'scene_splitting': 'deepseek/deepseek-chat-v3.1',
-                    'image_prompt_generation': 'deepseek/deepseek-chat-v3.1',
-                    'character_analysis': 'deepseek/deepseek-chat-v3.1'
-                }
+                models=openrouter_models
             ))
         
-        # OpenAI - 备用提供商1
-        if os.getenv('OPENAI_API_KEY'):
-            providers.append(LLMProvider(
-                name='openai',
-                api_key=os.getenv('OPENAI_API_KEY'),
-                base_url=os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
-                models={
-                    'script_generation': os.getenv('OPENAI_MODEL', 'gpt-4o-mini'),
-                    'theme_extraction': os.getenv('OPENAI_MODEL', 'gpt-4o-mini'),
-                    'scene_splitting': os.getenv('OPENAI_MODEL', 'gpt-4o-mini'),
-                    'image_prompt_generation': os.getenv('OPENAI_MODEL', 'gpt-4o-mini'),
-                    'character_analysis': os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
-                }
-            ))
+        # GPTsAPI - 备用提供商1 (GPT-5代理)
+        providers.append(LLMProvider(
+            name='gptsapi',
+            api_key='sk-yLda99082cd843c55e0453e3e23d384715143c3db7bmrz63',
+            base_url='https://api.gptsapi.net/v1',
+            models={
+                'script_generation': 'gpt-5',
+                'theme_extraction': 'gpt-5',
+                'scene_splitting': 'gpt-5',
+                'image_prompt_generation': 'gpt-5',
+                'character_analysis': 'gpt-5'
+            }
+        ))
         
         # DeepSeek - 备用提供商2
         if os.getenv('DEEPSEEK_API_KEY'):

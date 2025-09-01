@@ -474,29 +474,6 @@ class ImageToVideoGenerator:
             
             raise
     
-    def should_use_i2v(self, scene_content: str) -> bool:
-        """
-        基于场景内容判断是否应该使用图生视频
-        
-        Args:
-            scene_content: 场景内容文本
-        
-        Returns:
-            bool: 是否使用图生视频
-        """
-        if not self.i2v_config.get('enabled', False):
-            return False
-        
-        # 检查关键词
-        keywords = self.i2v_config.get('scene_selection_keywords', [])
-        scene_lower = scene_content.lower()
-        
-        for keyword in keywords:
-            if keyword.lower() in scene_lower:
-                self.logger.debug(f"Scene matches I2V keyword '{keyword}': {scene_content[:50]}...")
-                return True
-        
-        return False
     
     def get_stats(self) -> Dict[str, Any]:
         """获取图生视频生成器统计信息"""

@@ -71,15 +71,8 @@ class VideoComposer:
         if not self.i2v_config.get('enabled', False):
             return False
         
-        if self.animation_strategy == 'traditional':
-            return False
-        elif self.animation_strategy == 'image_to_video':
-            return True
-        elif self.animation_strategy == 'hybrid':
-            # 智能选择：基于场景内容判断
-            return self.i2v_generator.should_use_i2v(scene.content)
-        
-        return False
+        # 简化为二选一模式
+        return self.animation_strategy == 'image_to_video'
     
     async def _create_i2v_scene_video(self, scene, image, duration: float, scene_index: int, temp_dir: Path) -> Optional[Path]:
         """
@@ -140,12 +133,8 @@ class VideoComposer:
         except Exception as e:
             self.logger.error(f"I2V generation failed for scene {scene_index+1}: {e}")
             
-            # 如果配置了fallback，使用传统动画
-            if self.i2v_config.get('fallback_to_traditional', True):
-                self.logger.info(f"Falling back to traditional animation for scene {scene_index+1}")
-                return self._create_traditional_scene_video(scene, image, duration, scene_index, temp_dir)
-            else:
-                raise
+            # 图生视频失败，抛出异常
+            raise
     
     def _create_traditional_scene_video(self, scene, image, duration: float, scene_index: int, temp_dir: Path) -> Optional[Path]:
         """
@@ -232,10 +221,13 @@ class VideoComposer:
                     audio_duration=None, title_subtitle_file=None, use_jianying_style=True):
         """创建视频文件"""
         try:
-            # 创建临时工作目录
-            temp_dir = self.file_manager.get_output_path('temp', 'video_creation')
+            # 创建唯一临时工作目录（避免并发冲突）
+            import uuid
+            unique_id = str(uuid.uuid4())[:8]
+            temp_dir = self.file_manager.get_output_path('temp', f'video_creation_{unique_id}')
             temp_dir = Path(temp_dir)
             temp_dir.mkdir(parents=True, exist_ok=True)
+            self.logger.debug(f"Created unique temp directory: {temp_dir}")
             
             # 计算实际场景时长
             if audio_duration and audio_duration > 0:
@@ -268,16 +260,11 @@ class VideoComposer:
                     
                     if use_i2v:
                         # 图生视频模式（异步）
-                        try:
-                            scene_video = await self._create_i2v_scene_video(scene, image, duration, i, temp_dir)
-                            if scene_video and scene_video.exists():
-                                scene_videos.append(scene_video)
-                            else:
-                                self.logger.error(f"I2V failed for scene {i+1}, creating fallback")
-                                self._create_fallback_video(temp_dir, i+1, duration, scene_videos)
-                        except Exception as e:
-                            self.logger.error(f"I2V error for scene {i+1}: {e}")
-                            self._create_fallback_video(temp_dir, i+1, duration, scene_videos)
+                        scene_video = await self._create_i2v_scene_video(scene, image, duration, i, temp_dir)
+                        if scene_video and scene_video.exists():
+                            scene_videos.append(scene_video)
+                        else:
+                            raise Exception(f"Failed to generate I2V video for scene {i+1}")
                     else:
                         # 传统动画模式（同步）
                         scene_video = self._create_traditional_scene_video(scene, image, duration, i, temp_dir)
@@ -295,10 +282,36 @@ class VideoComposer:
                 self.logger.error("No scene videos created")
                 return None
             
-            # 第2步: 拼接所有场景视频
+            # 第2步: 统一编码参数后拼接场景视频
+            self.logger.info("Normalizing video segments for consistent encoding...")
+            
+            # 先将所有片段重编码为统一参数
+            normalized_videos = []
+            for i, video in enumerate(scene_videos):
+                normalized_video = temp_dir / f'normalized_scene_{i+1}.mp4'
+                cmd_normalize = [
+                    'ffmpeg', '-y',
+                    '-i', str(video),
+                    '-r', '30',  # 统一帧率
+                    '-pix_fmt', 'yuv420p',  # 统一像素格式
+                    '-c:v', 'libx264',  # 统一编码器
+                    '-crf', '20',  # 统一质量
+                    '-preset', 'medium',  # 编码速度
+                    str(normalized_video)
+                ]
+                
+                result = subprocess.run(cmd_normalize, capture_output=True, text=True)
+                if result.returncode == 0:
+                    normalized_videos.append(normalized_video)
+                    self.logger.debug(f"Normalized scene {i+1} video")
+                else:
+                    self.logger.error(f"Failed to normalize scene {i+1} video: {result.stderr}")
+                    return None
+            
+            # 拼接标准化后的视频
             concat_file = temp_dir / 'concat_list.txt'
             with open(concat_file, 'w') as f:
-                for video in scene_videos:
+                for video in normalized_videos:
                     f.write(f"file '{video.absolute()}'\n")
             
             merged_video = temp_dir / 'merged_video.mp4'
@@ -307,13 +320,13 @@ class VideoComposer:
                 '-f', 'concat',
                 '-safe', '0',
                 '-i', str(concat_file),
-                '-c', 'copy',
+                '-c', 'copy',  # 现在可以安全使用copy，因为参数已统一
                 str(merged_video)
             ]
             
             result = subprocess.run(cmd_concat, capture_output=True, text=True)
             if result.returncode != 0:
-                self.logger.error(f"Failed to merge videos: {result.stderr}")
+                self.logger.error(f"Failed to merge normalized videos: {result.stderr}")
                 return None
             
             # 第3步: 添加音频（使用音频时长）
@@ -324,14 +337,10 @@ class VideoComposer:
                     '-i', str(merged_video),
                     '-i', str(audio_file),
                     '-c:v', 'copy',
-                    '-c:a', 'aac'
+                    '-c:a', 'aac',
+                    '-shortest',  # 使用较短的流长度，避免音视频不同步
+                    str(video_with_audio)
                 ]
-                
-                # 如果提供了音频时长，使用音频时长；否则移除-shortest让FFmpeg自动处理
-                if audio_duration and audio_duration > 0:
-                    cmd_audio.extend(['-t', str(audio_duration)])
-                
-                cmd_audio.append(str(video_with_audio))
                 
                 result = subprocess.run(cmd_audio, capture_output=True, text=True)
                 if result.returncode == 0:

@@ -65,7 +65,6 @@
       "ddim_steps": 40,
       "model_id": 8,
       "primary_provider": "runninghub",
-      "fallback_providers": ["openai"],
       "runninghub": {
         "workflow_id": "1958005140101935106",
         "prompt_node_id": "39",
@@ -81,7 +80,6 @@
       "voice_volume": 1.0,
       "background_music_volume": 0.3,
       "primary_provider": "minimax",
-      "fallback_providers": ["minimax"],
       "minimax_voice": "male-qn-qingse"
     }
   },
@@ -96,13 +94,11 @@
       "enabled": true,
       "provider": "runninghub",
       "workflow_id": "1958006911062913026",
-      "fps": 16,
+      "fps": 31,
       "positive_prompt_node_id": "10",
       "negative_prompt_node_id": "1", 
       "wan_i2v_node_id": "5",
-      "load_image_node_id": "4",
-      "fallback_to_traditional": true,
-      "scene_selection_keywords": ["人物", "character", "特写", "close-up", "表情", "动作"]
+      "load_image_node_id": "4"
     }
   },
   "subtitle": {
@@ -150,7 +146,8 @@
     "enable_vad_filter": true,
     "vad_threshold": 0.35,
     "max_new_tokens": 128,
-    "enabled": false
+    "enabled": true,
+    "prefer_whisperx": true
   },
   "animation": {
     "scene_scale_range": [1.0, 1.15],

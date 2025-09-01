@@ -152,12 +152,11 @@ class MediaPipeline:
             raise
     
     async def _generate_scene_media(self, scenes: List[Scene], language: str) -> List[SceneMedia]:
-        """生成场景媒体（图像+音频）- 使用受控并发"""
-        self.logger.info(f"Generating media for {len(scenes)} scenes...")
+        """生成场景媒体（仅图像）- 音频由主程序统一生成"""
+        self.logger.info(f"Generating images for {len(scenes)} scenes...")
         
-        # 分离图像和音频请求
+        # 只处理图像请求，避免重复音频生成
         image_requests = []
-        audio_requests = []
         
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -179,13 +178,6 @@ class MediaPipeline:
                 scene_id=f"scene_{idx}_{timestamp}"
             )
             image_requests.append((scene, image_req))
-            
-            # 音频请求  
-            audio_req = AudioGenerationRequest(
-                text=scene.content,
-                language=language
-            )
-            audio_requests.append((scene, audio_req))
         
         # 使用批量生成方法（带并发控制）
         max_concurrent = self.config.get('general.max_concurrent_tasks', 3)
@@ -196,31 +188,24 @@ class MediaPipeline:
             image_gen_requests, max_concurrent, animation_strategy=animation_strategy
         )
         
-        # 批量生成音频（返回与输入同序，失败为None）  
-        audio_gen_requests = [req for _, req in audio_requests]
-        primary_provider = self.audio_config.get('primary_provider', 'minimax')
-        generated_audio = await self.audio_generator.batch_generate_audio(
-            audio_gen_requests, max_concurrent, provider=primary_provider
-        )
-        
-        # 组合结果
+        # 组合结果 - 只包含图像，音频由主程序统一处理
         scene_media = []
         
         for i, scene in enumerate(scenes):
             try:
-                # 检查是否有对应的媒体生成成功
+                # 只检查图像生成是否成功
                 image = generated_images[i] if i < len(generated_images) else None
-                audio = generated_audio[i] if i < len(generated_audio) else None
                 
-                if image and audio:
+                if image:
+                    # 🔧 SceneMedia暂时使用None作为audio，避免重复生成
                     scene_media.append(SceneMedia(
                         scene=scene,
                         image=image,
-                        audio=audio
+                        audio=None  # 音频由主程序统一生成
                     ))
-                    self.logger.info(f"Scene {i+1} media generation successful")
+                    self.logger.info(f"Scene {i+1} image generation successful")
                 else:
-                    self.logger.error(f"Scene {i+1} media generation failed: missing image or audio")
+                    self.logger.error(f"Scene {i+1} image generation failed")
                     
             except Exception as e:
                 self.logger.error(f"Scene {i+1} media combination failed: {e}")

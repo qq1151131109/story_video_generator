@@ -91,27 +91,27 @@ class ImageGenerator:
         根据动画策略获取自适应分辨率
         
         Args:
-            animation_strategy: 动画策略 (traditional, image_to_video, hybrid)
+            animation_strategy: 动画策略 (traditional, image_to_video)
         
         Returns:
             tuple[int, int]: (width, height)
         """
         if self.image_config.get('resolution_mode') != 'adaptive':
             # 固定分辨率模式，使用配置的分辨率
-            resolution_str = self.image_config.get('resolution', self.image_config.get('traditional_resolution', '1024x1024'))
+            resolution_str = self.image_config.get('resolution', self.image_config.get('traditional_resolution', '832x1216'))
             width, height = map(int, resolution_str.split('x'))
             return (width, height)
         
-        # 自适应分辨率模式
+        # 自适应分辨率模式 - 简化为二选一
         if not animation_strategy:
             animation_strategy = self.video_config.get('animation_strategy', 'traditional')
         
         if animation_strategy == 'image_to_video':
-            # 图生视频模式：使用视频分辨率，不需要额外缩放空间
+            # 图生视频模式：720x1280
             resolution_str = self.image_config.get('i2v_resolution', '720x1280')
         else:
-            # 传统动画模式：使用较大分辨率，为缩放/平移留空间
-            resolution_str = self.image_config.get('traditional_resolution', '1024x1024')
+            # 传统动画模式：832x1216 (为缩放/平移留空间)
+            resolution_str = self.image_config.get('traditional_resolution', '832x1216')
         
         width, height = map(int, resolution_str.split('x'))
         self.logger.debug(f"Adaptive resolution for {animation_strategy}: {width}x{height}")
@@ -306,7 +306,10 @@ class ImageGenerator:
         }
         
         self.logger.info(f"RunningHub request: {full_prompt[:50]}...")
-        self.logger.info(f"RunningHub payload: {payload}")
+        # 🔒 避免记录包含API密钥的payload
+        safe_payload = {k: v for k, v in payload.items() if k != 'apiKey'}
+        safe_payload['apiKey'] = '***'
+        self.logger.debug(f"RunningHub payload: {safe_payload}")
         
         async with aiohttp.ClientSession() as session:
             # 创建任务

@@ -100,13 +100,12 @@ class SubtitleAlignmentManager:
         self.logger.info(f"Starting subtitle alignment for audio: {request.audio_file}")
         
         # 只使用WhisperX精确对齐
-        if self.alignment_config['prefer_whisperx']:
-            result = self._try_whisperx_alignment(request)
-            if result:
-                return result
+        result = self._try_whisperx_alignment(request)
+        if result:
+            return result
         
-        # 如果没有WhisperX或WhisperX失败，直接抛出异常
-        raise Exception("WhisperX alignment failed or not available. No fallback methods provided.")
+        # WhisperX失败，直接抛出异常
+        raise Exception("WhisperX alignment failed or not available")
     
     def _try_whisperx_alignment(self, request: AlignmentRequest) -> Optional[AlignmentResult]:
         """尝试WhisperX对齐"""

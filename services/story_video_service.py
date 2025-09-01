@@ -128,14 +128,15 @@ class StoryVideoService:
         alignment_manager = SubtitleAlignmentManager(self.config, self.files)
         
         try:
-            # 创建对齐请求
+            # 创建对齐请求 - 从配置读取参数
+            subtitle_config = self.config.get('subtitle', {})
             alignment_request = AlignmentRequest(
                 audio_file=audio_file,
                 script_text=script_content,
                 tts_subtitles=tts_subtitles,
                 language=language,
-                max_chars_per_line=12,  # 移动端优化
-                max_duration_per_subtitle=3.0
+                max_chars_per_line=subtitle_config.get('max_chars_per_line', 10),
+                max_duration_per_subtitle=subtitle_config.get('force_split_threshold', 3.0)
             )
             
             # 执行对齐
