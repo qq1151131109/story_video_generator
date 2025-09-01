@@ -9,7 +9,6 @@ import json
 from typing import Dict, Optional, Any
 from dataclasses import dataclass
 
-import openai
 from core.config_manager import ConfigManager
 from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
@@ -42,7 +41,7 @@ class ThemeExtractor:
     def __init__(self, config_manager: ConfigManager, 
                  cache_manager: CacheManager, file_manager: FileManager):
         self.config = config_manager
-        self.cache = cache_manager
+        self.cache = cache_manager  # May be None
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
@@ -75,9 +74,9 @@ class ThemeExtractor:
                 'content': request.content[:200],  # 使用前200字作为缓存键
                 'language': request.language,
                 'type': 'theme_extraction'
-            })
+            }) if self.cache else None
             
-            cached_result = self.cache.get('scripts', cache_key)
+            cached_result = self.cache.get('scripts', cache_key) if self.cache and cache_key else None
             if cached_result:
                 self.logger.info("Cache hit for theme extraction")
                 cached_result['processing_time'] = time.time() - start_time
@@ -125,7 +124,8 @@ class ThemeExtractor:
                 'success': result.success,
                 'title': result.title
             }
-            self.cache.set('scripts', cache_key, cache_data)
+            if self.cache and cache_key:
+                self.cache.set('scripts', cache_key, cache_data)
             
             self.logger.info(f"Theme extracted: '{title}' in {result.processing_time:.2f}s")
             return result
@@ -225,7 +225,7 @@ Title:"""
     
     def get_extraction_stats(self) -> Dict[str, Any]:
         """获取提取统计信息"""
-        cache_stats = self.cache.get_cache_stats()
+        cache_stats = self.cache.get_cache_stats() if self.cache else {}
         
         return {
             'cache_stats': cache_stats.get('disk_cache', {}).get('scripts', {}),

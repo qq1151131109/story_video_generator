@@ -214,7 +214,8 @@ class FileManager:
             'subtitles': self.output_dir / "subtitles",
             'manifests': self.output_dir / "manifests",
             'logs': self.output_dir / "logs",
-            'temp': self.output_dir / "temp"
+            'temp': self.output_dir / "temp",
+            'debug': self.output_dir / "debug"
         }
         
         if category not in category_dirs:

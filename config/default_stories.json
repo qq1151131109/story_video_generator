@@ -1,9 +1,9 @@
 {
   "settings": {
-    "language": "zh"
+    "language": "en"
   },
   "stories": [
-    "秦始皇统一六国",
-    "汉武帝北击匈奴"
+    "The Rise and Fall of the Roman Empire",
+    "Napoleon's Conquest of Europe"
   ]
 }

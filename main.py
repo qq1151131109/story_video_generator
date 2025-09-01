@@ -19,6 +19,7 @@ from tools.load_env import load_env_file
 load_env_file(verbose=False)  # 静默加载
 
 from utils.i18n import get_i18n_manager, set_global_language, t
+from utils.logger import setup_logging
 from content.content_pipeline import ContentPipeline, ContentGenerationRequest
 from media.media_pipeline import MediaPipeline, MediaGenerationRequest
 from services.story_video_service import StoryVideoService

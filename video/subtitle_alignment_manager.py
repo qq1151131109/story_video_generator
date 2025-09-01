@@ -247,9 +247,9 @@ class SubtitleAlignmentManager:
         methods = []
         if self.alignment_config['prefer_whisperx']:
             methods.append("WhisperX")
-        if self.alignment_config['enable_tts_fallback']:
+        if self.alignment_config.get('enable_tts_fallback', False):
             methods.append("TTS")
-        if self.alignment_config['enable_estimate_fallback']:
+        if self.alignment_config.get('enable_estimate_fallback', False):
             methods.append("Estimation")
         
         return f"SubtitleAlignmentManager(methods={methods})"

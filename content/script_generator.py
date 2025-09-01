@@ -8,7 +8,6 @@ import time
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import logging
-import openai
 from dataclasses import dataclass
 
 from core.config_manager import ConfigManager, ModelConfig

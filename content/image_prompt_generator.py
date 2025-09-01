@@ -8,7 +8,6 @@ import time
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 import logging
-import openai
 from dataclasses import dataclass
 
 from core.config_manager import ConfigManager, ModelConfig
@@ -46,7 +45,7 @@ class ImagePromptGenerator:
     def __init__(self, config_manager: ConfigManager, 
                  cache_manager: CacheManager, file_manager: FileManager):
         self.config = config_manager
-        self.cache = cache_manager
+        self.cache = cache_manager  # May be None
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
@@ -58,6 +57,9 @@ class ImagePromptGenerator:
         
         # 初始化多提供商LLM客户端管理器
         self.llm_manager = LLMClientManager(config_manager)
+        
+        # 加载提示词模板
+        self._load_prompt_templates()
         
         self.logger.info("Image prompt generator initialized")
     
@@ -82,9 +84,9 @@ class ImagePromptGenerator:
                 'style': request.style
             }
             
-            cache_key = self.cache.get_cache_key(cache_key_data)
+            cache_key = self.cache.get_cache_key(cache_key_data) if self.cache else None
             
-            cached_result = self.cache.get('image_prompts', cache_key)
+            cached_result = self.cache.get('image_prompts', cache_key) if self.cache and cache_key else None
             if cached_result:
                 self.logger.info(f"Cache hit for image prompt generation: {request.language}")
                 cached_result['generation_time'] = time.time() - start_time
@@ -126,7 +128,8 @@ class ImagePromptGenerator:
                 'model_used': result.model_used
             }
             
-            self.cache.set('image_prompts', cache_key, cache_data)
+            if self.cache and cache_key:
+                self.cache.set('image_prompts', cache_key, cache_data)
             
             # 记录日志
             logger = self.config.get_logger('story_generator')
@@ -150,55 +153,31 @@ class ImagePromptGenerator:
     
     def _build_image_prompt_generation_prompt(self, request: ImagePromptRequest) -> str:
         """
-        构建图像提示词生成提示词 - 基于原工作流Node_186126的System Prompt
+        构建图像提示词生成提示词 - 使用模板文件
         """
         # 准备场景数据
         scenes_json = []
         for scene in request.scenes:
             scenes_json.append({
                 "cap": scene.content,
-                "desc_promopt": ""  # 待填充
+                "desc_prompt": ""  # 待填充，注意字段名修正
             })
         
         scenes_json_str = json.dumps(scenes_json, ensure_ascii=False, indent=2)
         
-        # 基于原Coze工作流Node_186126的完整System Prompt
-        system_prompt = """# 角色
-根据分镜字幕cap生成绘画提示词desc_prompt。
+        # 使用模板文件
+        language = request.language
+        if language in self.prompt_templates:
+            system_prompt = self.prompt_templates[language]
+        else:
+            # 使用中文作为后备
+            system_prompt = self.prompt_templates.get('zh', '')
+            self.logger.warning(f"No image prompt template for language {language}, using Chinese as fallback")
 
-## 技能
-### 技能 1: 生成绘画提示
-1. 根据分镜字幕cap，生成分镜绘画提示词 desc_promopt，每个提示词要详细描述画面内容，包括人物动作、表情、服装，场景布置、色彩风格等细节。
-  - 风格要求：古代惊悚插画风格，颜色很深，黑暗中，黄昏，氛围凝重，庄严肃穆，构建出紧张氛围，古代服饰，古装，线条粗狂，清晰、人物特写，粗狂手笔，高清，高对比度，色彩低饱和，浅景深
-  - 第一个分镜画面中不要出现人物，只需要一个画面背景
-  - **重要：desc_promopt必须用英文生成，确保每个场景的描述都包含不同的细节、角度或元素，避免重复**
-  - 每个场景必须有独特的视觉元素：
-    * 不同的镜头角度 (close-up, wide shot, low-angle, bird's eye view等)
-    * 不同的人物状态和表情
-    * 不同的环境细节和背景元素
-    * 不同的光影效果和色彩重点
-    * 不同的构图和透视
-
-===回复示例===
-[
-  {
-    "cap": "字幕文案",
-    "desc_promopt": "Ancient China, Qin Shi Huang in Xianyang Palace, wide establishing shot, wearing black dragon robe with golden embroidery, stern and contemplative expression, ornate throne room with red pillars, dim candlelight creating dramatic shadows, ancient horror style, high contrast, low saturation colors, shallow depth of field"
-  }
-]
-===示例结束===
-
-## 限制:
-- 只对用户提供的json内容补充desc_prompt字段，不能更改原文
-- 严格检查输出的json格式正确性并进行修正，特别注意json格式不要少括号，逗号等
-- **确保每个desc_promopt都用英文生成，包含具体细节，并且彼此不同**
-- 必须包含镜头角度、人物细节、环境描述、光影效果等多个维度的差异
-
-现在请为以下场景生成详细的英文图像提示词：
-
-"""
-
-        return system_prompt + scenes_json_str
+        # 替换模板中的占位符
+        prompt = system_prompt.replace("{{scenes}}", scenes_json_str)
+        
+        return prompt
     
     async def _call_llm_api(self, prompt: str) -> str:
         """
@@ -256,8 +235,8 @@ class ImagePromptGenerator:
                 if not isinstance(prompt_data, dict):
                     raise ValueError(f"Scene {i+1} data should be an object")
                 
-                # 获取生成的英文提示词
-                image_prompt = prompt_data.get('desc_promopt', '').strip()
+                # 获取生成的英文提示词 - 支持两种字段名
+                image_prompt = prompt_data.get('desc_prompt', prompt_data.get('desc_promopt', '')).strip()
                 
                 # 验证提示词质量
                 if not image_prompt:
@@ -365,7 +344,7 @@ class ImagePromptGenerator:
     
     def get_generation_stats(self) -> Dict[str, Any]:
         """获取生成统计信息"""
-        cache_stats = self.cache.get_cache_stats()
+        cache_stats = self.cache.get_cache_stats() if self.cache else {}
         
         return {
             'supported_languages': self.supported_languages,
@@ -377,6 +356,27 @@ class ImagePromptGenerator:
             }
         }
     
+    def _load_prompt_templates(self):
+        """加载提示词模板"""
+        self.prompt_templates = {}
+        prompts_dir = Path("config/prompts")
+        
+        for lang in self.supported_languages:
+            lang_dir = prompts_dir / lang
+            template_file = lang_dir / "image_prompt_generation.txt"
+            
+            if template_file.exists():
+                try:
+                    with open(template_file, 'r', encoding='utf-8') as f:
+                        self.prompt_templates[lang] = f.read().strip()
+                    self.logger.debug(f"Loaded image prompt template for language: {lang}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to load image prompt template for {lang}: {e}")
+            else:
+                self.logger.warning(f"Image prompt template not found: {template_file}")
+        
+        self.logger.info(f"Loaded {len(self.prompt_templates)} image prompt templates")
+
     def __str__(self) -> str:
         """字符串表示"""
         return f"ImagePromptGenerator(model={self.llm_config.name}, languages={self.supported_languages})"

@@ -18,7 +18,7 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent))
 
 # 加载环境变量
-from load_env import load_env_file
+from tools.load_env import load_env_file
 load_env_file()
 
 from core.config_manager import ConfigManager

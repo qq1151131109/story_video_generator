@@ -8,7 +8,6 @@ import time
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import logging
-import openai
 from dataclasses import dataclass
 
 from core.config_manager import ConfigManager, ModelConfig
@@ -84,7 +83,7 @@ class SceneSplitter:
         if self._image_prompt_generator is None:
             from .image_prompt_generator import ImagePromptGenerator
             self._image_prompt_generator = ImagePromptGenerator(
-                self.config, self.cache, self.file_manager
+                self.config, None, self.file_manager
             )
             self.logger.info("Initialized image prompt generator")
         return self._image_prompt_generator

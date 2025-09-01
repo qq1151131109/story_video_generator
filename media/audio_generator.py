@@ -88,16 +88,22 @@ class AudioGenerator:
             'openai': config_manager.get_api_key('openrouter')
         }
         
-        # 提供商优先级 - 保持兼容性
-        self.primary_provider = self.audio_config.get('primary_provider', 'minimax')
-        self.fallback_providers = self.audio_config.get('fallback_providers', ['elevenlabs'])
+        # 提供商优先级 - 支持按语言配置
+        primary_provider_config = self.audio_config.get('primary_provider', 'minimax')
+        if isinstance(primary_provider_config, dict):
+            # 按语言配置
+            self.language_providers = primary_provider_config
+            self.primary_provider = primary_provider_config.get('zh', 'minimax')  # 默认使用中文配置
+        else:
+            # 统一配置
+            self.primary_provider = primary_provider_config
+            self.language_providers = {
+                'zh': self.primary_provider,
+                'en': self.primary_provider,
+                'es': self.primary_provider,
+            }
         
-        # 语言专用提供商策略 - 使用配置文件中的primary_provider
-        self.language_providers = {
-            'zh': self.primary_provider,
-            'en': self.primary_provider,
-            'es': self.primary_provider,
-        }
+        self.fallback_providers = self.audio_config.get('fallback_providers', ['elevenlabs'])
         
         # 语音配置
         self._load_voice_configs()
@@ -151,7 +157,7 @@ class AudioGenerator:
                     'style': 'audiobook'
                 },
                 'en': {
-                    'voice_id': 'male-en-01',  # MiniMax英文男声  
+                    'voice_id': 'male-qn-qingse',  # 使用中文语音，MiniMax支持
                     'style': 'audiobook'
                 }
             },
@@ -208,7 +214,16 @@ class AudioGenerator:
             else:
                 # 根据语言选择最佳提供商
                 preferred_provider = self.language_providers.get(request.language, self.primary_provider)
-                providers_to_try = [preferred_provider] + [p for p in self.fallback_providers if p != preferred_provider]
+                
+                # 确保preferred_provider是字符串
+                if isinstance(preferred_provider, dict):
+                    preferred_provider = preferred_provider.get(request.language, 'elevenlabs')
+                
+                # 安全构建提供商列表，确保所有元素都是字符串
+                providers_to_try = [preferred_provider]
+                for p in self.fallback_providers:
+                    if isinstance(p, str) and p != preferred_provider:
+                        providers_to_try.append(p)
             
             last_error = None
             for provider_name in providers_to_try:
