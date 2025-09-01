@@ -67,6 +67,7 @@ class ImageGenerator:
         # 获取媒体配置
         self.media_config = config_manager.get_media_config()
         self.image_config = config_manager.get('media.image', {})
+        self.video_config = config_manager.get('video', {})
         
         # API密钥
         self.api_keys = {
@@ -83,6 +84,38 @@ class ImageGenerator:
         self._load_style_prompts()
         
         self.logger.info(f"Image generator initialized with primary provider: {self.primary_provider}")
+        self.logger.info(f"Resolution mode: {self.image_config.get('resolution_mode', 'adaptive')}")
+    
+    def get_adaptive_resolution(self, animation_strategy: str = None) -> tuple[int, int]:
+        """
+        根据动画策略获取自适应分辨率
+        
+        Args:
+            animation_strategy: 动画策略 (traditional, image_to_video, hybrid)
+        
+        Returns:
+            tuple[int, int]: (width, height)
+        """
+        if self.image_config.get('resolution_mode') != 'adaptive':
+            # 固定分辨率模式，使用配置的分辨率
+            resolution_str = self.image_config.get('resolution', self.image_config.get('traditional_resolution', '1024x1024'))
+            width, height = map(int, resolution_str.split('x'))
+            return (width, height)
+        
+        # 自适应分辨率模式
+        if not animation_strategy:
+            animation_strategy = self.video_config.get('animation_strategy', 'traditional')
+        
+        if animation_strategy == 'image_to_video':
+            # 图生视频模式：使用视频分辨率，不需要额外缩放空间
+            resolution_str = self.image_config.get('i2v_resolution', '720x1280')
+        else:
+            # 传统动画模式：使用较大分辨率，为缩放/平移留空间
+            resolution_str = self.image_config.get('traditional_resolution', '1024x1024')
+        
+        width, height = map(int, resolution_str.split('x'))
+        self.logger.debug(f"Adaptive resolution for {animation_strategy}: {width}x{height}")
+        return (width, height)
     
     def _load_style_prompts(self):
         """加载样式提示词"""
@@ -95,13 +128,15 @@ class ImageGenerator:
         }
     
     async def generate_image_async(self, request: ImageGenerationRequest, 
-                                 provider: Optional[str] = None) -> GeneratedImage:
+                                 provider: Optional[str] = None,
+                                 animation_strategy: Optional[str] = None) -> GeneratedImage:
         """
         异步生成图像
         
         Args:
             request: 图像生成请求
             provider: 指定提供商（可选）
+            animation_strategy: 动画策略（用于自适应分辨率）
         
         Returns:
             GeneratedImage: 生成的图像
@@ -109,6 +144,14 @@ class ImageGenerator:
         start_time = time.time()
         
         try:
+            # 🎯 自适应分辨率：根据动画策略调整图片尺寸
+            if self.image_config.get('resolution_mode') == 'adaptive':
+                adaptive_width, adaptive_height = self.get_adaptive_resolution(animation_strategy)
+                if adaptive_width != request.width or adaptive_height != request.height:
+                    self.logger.info(f"Adaptive resolution: {request.width}x{request.height} -> {adaptive_width}x{adaptive_height} (strategy: {animation_strategy})")
+                    request.width = adaptive_width
+                    request.height = adaptive_height
+            
             # 缓存已禁用 - 每次都生成新图像
             
             # 构建完整提示词
@@ -522,24 +565,26 @@ class ImageGenerator:
         return asyncio.run(self.generate_image_async(request, provider))
     
     async def batch_generate_images(self, requests: List[ImageGenerationRequest], 
-                                  max_concurrent: int = 3) -> List[Optional[GeneratedImage]]:
+                                  max_concurrent: int = 3,
+                                  animation_strategy: Optional[str] = None) -> List[Optional[GeneratedImage]]:
         """
         批量生成图像
         
         Args:
             requests: 图像生成请求列表
             max_concurrent: 最大并发数
+            animation_strategy: 动画策略（用于自适应分辨率）
         
         Returns:
             List[GeneratedImage]: 生成的图像列表
         """
-        self.logger.info(f"Starting batch image generation: {len(requests)} requests")
+        self.logger.info(f"Starting batch image generation: {len(requests)} requests (strategy: {animation_strategy})")
         
         semaphore = asyncio.Semaphore(max_concurrent)
         
         async def generate_with_semaphore(request: ImageGenerationRequest) -> GeneratedImage:
             async with semaphore:
-                return await self.generate_image_async(request)
+                return await self.generate_image_async(request, animation_strategy=animation_strategy)
         
         # 执行并发生成
         tasks = [generate_with_semaphore(request) for request in requests]

@@ -161,11 +161,15 @@ class MediaPipeline:
         
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # 获取动画策略以确定图片分辨率
+        animation_strategy = self.config.get('video.animation_strategy', 'traditional')
+        
         for idx, scene in enumerate(scenes, start=1):
-            # 图像请求 - 从配置读取分辨率
+            # 图像请求 - 使用自适应分辨率
             prompt = scene.image_prompt if scene.image_prompt else f"历史场景：{scene.content}"
-            media_config = self.config.get_media_config()
-            width, height = map(int, media_config.image_resolution.split('x'))
+            
+            # 🎯 自适应分辨率：根据动画策略选择分辨率
+            width, height = self.image_generator.get_adaptive_resolution(animation_strategy)
             
             image_req = ImageGenerationRequest(
                 prompt=prompt,
@@ -189,7 +193,7 @@ class MediaPipeline:
         # 批量生成图像（返回与输入同序，失败为None）
         image_gen_requests = [req for _, req in image_requests]
         generated_images = await self.image_generator.batch_generate_images(
-            image_gen_requests, max_concurrent
+            image_gen_requests, max_concurrent, animation_strategy=animation_strategy
         )
         
         # 批量生成音频（返回与输入同序，失败为None）  

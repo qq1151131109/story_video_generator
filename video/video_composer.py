@@ -1,11 +1,13 @@
 """
 视频合成器 - 使用FFmpeg合成最终视频
 专门负责将场景、图像、音频、字幕合成为完整的MP4视频
+支持传统动画和图生视频双模式
 """
 import re
 import subprocess
 import shutil
 import logging
+import asyncio
 from pathlib import Path
 from typing import List, Optional
 
@@ -13,6 +15,7 @@ from core.config_manager import ConfigManager
 from utils.file_manager import FileManager
 from video.subtitle_engine import SubtitleEngine, SubtitleRequest
 from video.enhanced_animation_processor import EnhancedAnimationProcessor, AnimationRequest
+from media.image_to_video_generator import ImageToVideoGenerator, ImageToVideoRequest
 
 
 class VideoComposer:
@@ -35,6 +38,13 @@ class VideoComposer:
         # 初始化增强动画处理器
         self.animation_processor = EnhancedAnimationProcessor(config_manager)
         
+        # 初始化图生视频生成器
+        self.i2v_generator = ImageToVideoGenerator(config_manager, file_manager)
+        
+        # 获取动画策略配置
+        self.animation_strategy = self.config.get('video.animation_strategy', 'traditional')
+        self.i2v_config = self.config.get('video.image_to_video', {})
+        
         # 检查FFmpeg是否可用
         self._check_ffmpeg()
     
@@ -46,6 +56,160 @@ class VideoComposer:
         except (subprocess.CalledProcessError, FileNotFoundError):
             self.logger.error("FFmpeg not found. Please install FFmpeg first.")
             self.logger.info("Install guide: https://ffmpeg.org/download.html")
+    
+    def _should_use_i2v_for_scene(self, scene, scene_index: int) -> bool:
+        """
+        判断某个场景是否应该使用图生视频
+        
+        Args:
+            scene: 场景对象
+            scene_index: 场景索引
+        
+        Returns:
+            bool: 是否使用图生视频
+        """
+        if not self.i2v_config.get('enabled', False):
+            return False
+        
+        if self.animation_strategy == 'traditional':
+            return False
+        elif self.animation_strategy == 'image_to_video':
+            return True
+        elif self.animation_strategy == 'hybrid':
+            # 智能选择：基于场景内容判断
+            return self.i2v_generator.should_use_i2v(scene.content)
+        
+        return False
+    
+    async def _create_i2v_scene_video(self, scene, image, duration: float, scene_index: int, temp_dir: Path) -> Optional[Path]:
+        """
+        创建图生视频场景视频
+        
+        Args:
+            scene: 场景对象
+            image: 图像对象
+            duration: 场景时长
+            scene_index: 场景索引
+            temp_dir: 临时目录
+        
+        Returns:
+            Optional[Path]: 生成的视频文件路径
+        """
+        try:
+            self.logger.info(f"Scene {scene_index+1}: Using image-to-video generation")
+            
+            # 构建图生视频请求
+            i2v_request = ImageToVideoRequest(
+                image_path=str(image.file_path),
+                desc_prompt=scene.image_prompt or scene.content,  # 使用场景的图像提示词
+                duration_seconds=duration,
+                width=720,  # 直接使用目标视频分辨率
+                height=1280
+            )
+            
+            # 生成图生视频
+            i2v_result = await self.i2v_generator.generate_video_async(i2v_request)
+            
+            # 将生成的视频复制到临时目录（标准化文件名）
+            scene_video = temp_dir / f"scene_{scene_index+1}.mp4"
+            
+            # 如果需要调整时长，使用FFmpeg裁剪
+            if abs(duration - i2v_result.duration_seconds) > 0.1:  # 超过0.1秒差异需要调整
+                self.logger.info(f"Adjusting I2V video duration: {i2v_result.duration_seconds}s -> {duration}s")
+                
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-i', i2v_result.video_path,
+                    '-t', str(duration),
+                    '-c', 'copy',  # 不重新编码，直接裁剪
+                    str(scene_video)
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    self.logger.warning(f"Failed to adjust I2V video duration: {result.stderr}")
+                    # 使用原始视频
+                    shutil.copy(i2v_result.video_path, scene_video)
+            else:
+                # 直接复制
+                shutil.copy(i2v_result.video_path, scene_video)
+            
+            self.logger.info(f"I2V scene video created: {scene_video}")
+            return scene_video
+            
+        except Exception as e:
+            self.logger.error(f"I2V generation failed for scene {scene_index+1}: {e}")
+            
+            # 如果配置了fallback，使用传统动画
+            if self.i2v_config.get('fallback_to_traditional', True):
+                self.logger.info(f"Falling back to traditional animation for scene {scene_index+1}")
+                return self._create_traditional_scene_video(scene, image, duration, scene_index, temp_dir)
+            else:
+                raise
+    
+    def _create_traditional_scene_video(self, scene, image, duration: float, scene_index: int, temp_dir: Path) -> Optional[Path]:
+        """
+        创建传统动画场景视频
+        
+        Args:
+            scene: 场景对象
+            image: 图像对象  
+            duration: 场景时长
+            scene_index: 场景索引
+            temp_dir: 临时目录
+        
+        Returns:
+            Optional[Path]: 生成的视频文件路径
+        """
+        scene_video = temp_dir / f"scene_{scene_index+1}.mp4"
+        
+        try:
+            # 🎬 使用增强动画处理器创建Ken Burns效果
+            animation_request = AnimationRequest(
+                image_path=str(image.file_path),
+                duration_seconds=duration,
+                animation_type="智能选择",
+                is_character=False
+            )
+            
+            # 创建Ken Burns动画
+            animation_clip = self.animation_processor.create_scene_animation(
+                animation_request, scene_index=scene_index)
+            
+            # 生成增强版FFmpeg滤镜
+            animation_filter = self.animation_processor.generate_enhanced_ffmpeg_filter(
+                animation_clip, (self.width, self.height))
+            
+            # 防御性检查：禁止旧表达式混入
+            if 't/' in animation_filter:
+                self.logger.warning(f"Detected legacy time-based expression in filter; falling back to basic filter for scene {scene_index+1}")
+                animation_filter = f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2"
+            
+            self.logger.info(f"Scene {scene_index+1}: Using {animation_clip.animation_type} traditional animation")
+            
+            # 使用增强动画滤镜创建场景视频
+            cmd = [
+                'ffmpeg', '-y',
+                '-loop', '1',
+                '-i', str(image.file_path),
+                '-filter_complex', animation_filter,
+                '-t', str(duration),
+                '-pix_fmt', 'yuv420p',
+                '-r', '30',
+                str(scene_video)
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                self.logger.info(f"Created traditional scene video {scene_index+1}: {scene_video}")
+                return scene_video
+            else:
+                self.logger.error(f"Failed to create traditional scene video {scene_index+1}: {result.stderr}")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Traditional animation failed for scene {scene_index+1}: {e}")
+            return None
     
     def _create_fallback_video(self, temp_dir, scene_number, duration, scene_videos):
         """创建黑色背景的fallback视频"""
@@ -64,7 +228,7 @@ class VideoComposer:
         else:
             self.logger.error(f"Failed to create fallback video {scene_number}: {result.stderr}")
     
-    def create_video(self, scenes, images, audio_file, subtitle_file, output_path, 
+    async def create_video(self, scenes, images, audio_file, subtitle_file, output_path, 
                     audio_duration=None, title_subtitle_file=None, use_jianying_style=True):
         """创建视频文件"""
         try:
@@ -93,56 +257,38 @@ class VideoComposer:
                 actual_scene_durations = [scene.duration_seconds for scene in scenes]
                 self.logger.info("Using original scene durations")
             
-            # 第1步: 为每个场景创建视频片段
+            # 第1步: 为每个场景创建视频片段（支持双模式）
             scene_videos = []
+            
+            # 混合异步/同步处理：图生视频用异步，传统动画用同步
             for i, (scene, image, duration) in enumerate(zip(scenes, images, actual_scene_durations)):
-                scene_video = temp_dir / f"scene_{i+1}.mp4"
-                
                 if image and image.file_path and Path(image.file_path).exists():
-                    # 🎬 使用增强动画处理器创建Ken Burns效果
-                    animation_request = AnimationRequest(
-                        image_path=str(image.file_path),
-                        duration_seconds=duration,
-                        animation_type="智能选择",
-                        is_character=False
-                    )
+                    # 判断使用哪种动画模式
+                    use_i2v = self._should_use_i2v_for_scene(scene, i)
                     
-                    # 创建Ken Burns动画
-                    animation_clip = self.animation_processor.create_scene_animation(
-                        animation_request, scene_index=i)
-                    
-                    # 生成增强版FFmpeg滤镜
-                    animation_filter = self.animation_processor.generate_enhanced_ffmpeg_filter(
-                        animation_clip, (self.width, self.height))
-                    # 防御性检查：禁止旧表达式混入
-                    if 't/' in animation_filter:
-                        self.logger.warning(f"Detected legacy time-based expression in filter; falling back to basic filter for scene {i+1}")
-                        animation_filter = f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2"
-                    
-                    self.logger.info(f"Scene {i+1}: Using {animation_clip.animation_type} animation")
-                    
-                    # 使用增强动画滤镜创建场景视频
-                    cmd = [
-                        'ffmpeg', '-y',
-                        '-loop', '1',
-                        '-i', str(image.file_path),
-                        '-filter_complex', animation_filter,
-                        '-t', str(duration),
-                        '-pix_fmt', 'yuv420p',
-                        '-r', '30',
-                        str(scene_video)
-                    ]
-                    
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    if result.returncode == 0:
-                        scene_videos.append(scene_video)
-                        self.logger.info(f"Created scene video {i+1}: {scene_video}")
+                    if use_i2v:
+                        # 图生视频模式（异步）
+                        try:
+                            scene_video = await self._create_i2v_scene_video(scene, image, duration, i, temp_dir)
+                            if scene_video and scene_video.exists():
+                                scene_videos.append(scene_video)
+                            else:
+                                self.logger.error(f"I2V failed for scene {i+1}, creating fallback")
+                                self._create_fallback_video(temp_dir, i+1, duration, scene_videos)
+                        except Exception as e:
+                            self.logger.error(f"I2V error for scene {i+1}: {e}")
+                            self._create_fallback_video(temp_dir, i+1, duration, scene_videos)
                     else:
-                        self.logger.error(f"Failed to create scene video {i+1}: {result.stderr}")
-                        # 图片处理失败，创建黑色背景备用视频
-                        self._create_fallback_video(temp_dir, i+1, duration, scene_videos)
+                        # 传统动画模式（同步）
+                        scene_video = self._create_traditional_scene_video(scene, image, duration, i, temp_dir)
+                        if scene_video and scene_video.exists():
+                            scene_videos.append(scene_video)
+                        else:
+                            self.logger.error(f"Traditional animation failed for scene {i+1}, creating fallback")
+                            self._create_fallback_video(temp_dir, i+1, duration, scene_videos)
                 else:
                     # 没有图片，直接创建黑色背景视频
+                    self.logger.warning(f"No image for scene {i+1}, creating fallback video")
                     self._create_fallback_video(temp_dir, i+1, duration, scene_videos)
             
             if not scene_videos:
@@ -336,3 +482,15 @@ class VideoComposer:
         seconds = float(time_parts[2])
         
         return hours * 3600 + minutes * 60 + seconds
+    
+    def create_video_sync(self, scenes, images, audio_file, subtitle_file, output_path, 
+                         audio_duration=None, title_subtitle_file=None, use_jianying_style=True):
+        """
+        同步创建视频（对异步方法的包装）
+        
+        保持向后兼容性
+        """
+        return asyncio.run(self.create_video(
+            scenes, images, audio_file, subtitle_file, output_path,
+            audio_duration, title_subtitle_file, use_jianying_style
+        ))

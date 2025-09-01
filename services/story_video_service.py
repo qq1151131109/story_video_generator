@@ -238,7 +238,7 @@ class StoryVideoService:
         self.logger.info("Composing final video...")
         
         try:
-            video_path = self.video_composer.create_video(
+            video_path = await self.video_composer.create_video(
                 scenes=scenes,
                 images=images,
                 audio_file=audio_file,

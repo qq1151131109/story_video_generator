@@ -23,28 +23,32 @@
       "api_key": "${OPENROUTER_API_KEY}"
     },
     "theme_extraction": {
-      "model": "deepseek/deepseek-chat-v3.1",
+      "model": "openai/gpt-5",
+      "fallback_model": "google/gemini-2.5-flash",
       "temperature": 1.0,
       "max_tokens": 512,
       "api_base": "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}",
       "api_key": "${OPENROUTER_API_KEY}"
     },
     "scene_splitting": {
-      "model": "deepseek/deepseek-chat-v3.1",
+      "model": "openai/gpt-5",
+      "fallback_model": "google/gemini-2.5-flash",
       "temperature": 0.8,
       "max_tokens": 8192,
       "api_base": "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}",
       "api_key": "${OPENROUTER_API_KEY}"
     },
     "image_prompt_generation": {
-      "model": "deepseek/deepseek-chat-v3.1",
+      "model": "openai/gpt-5",
+      "fallback_model": "google/gemini-2.5-flash",
       "temperature": 1.0,
       "max_tokens": 16384,
       "api_base": "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}",
       "api_key": "${OPENROUTER_API_KEY}"
     },
     "character_analysis": {
-      "model": "deepseek/deepseek-chat-v3.1",
+      "model": "openai/gpt-5",
+      "fallback_model": "google/gemini-2.5-flash",
       "temperature": 0.8,
       "max_tokens": 8192,
       "api_base": "${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}",
@@ -53,7 +57,9 @@
   },
   "media": {
     "image": {
-      "resolution": "832x1216",
+      "resolution_mode": "adaptive",
+      "traditional_resolution": "832x1216",
+      "i2v_resolution": "720x1280",
       "quality": "high",
       "style": "ancient_horror",
       "ddim_steps": 40,
@@ -65,7 +71,8 @@
         "prompt_node_id": "39",
         "resolution_node_id": "5",
         "supports_custom_resolution": true,
-        "notes": "已配置正确的节点ID，支持1024x1024自定义分辨率"
+        "i2v_workflow_id": "1958006911062913026",
+        "notes": "已配置正确的节点ID，支持自适应分辨率"
       }
     },
     "audio": {
@@ -83,7 +90,20 @@
     "fps": 30,
     "format": "mp4",
     "enable_subtitles": true,
-    "enable_keyframes": true
+    "enable_keyframes": true,
+    "animation_strategy": "image_to_video",
+    "image_to_video": {
+      "enabled": true,
+      "provider": "runninghub",
+      "workflow_id": "1958006911062913026",
+      "fps": 16,
+      "positive_prompt_node_id": "10",
+      "negative_prompt_node_id": "1", 
+      "wan_i2v_node_id": "5",
+      "load_image_node_id": "4",
+      "fallback_to_traditional": true,
+      "scene_selection_keywords": ["人物", "character", "特写", "close-up", "表情", "动作"]
+    }
   },
   "subtitle": {
     "video_width": 720,
@@ -126,7 +146,7 @@
     "device": "auto",
     "return_char_alignments": false,
     "print_progress": true,
-    "language": "zh",
+    "language": "auto",
     "enable_vad_filter": true,
     "vad_threshold": 0.35,
     "max_new_tokens": 128,
