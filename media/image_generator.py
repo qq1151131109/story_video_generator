@@ -71,14 +71,13 @@ class ImageGenerator:
         
         # API密钥
         self.api_keys = {
-            'runninghub': config_manager.get_api_key('runninghub'),
-            'openai': config_manager.get_api_key('openrouter')
+            'runninghub': config_manager.get_api_key('runninghub')
         }
         
         
         # 提供商优先级
         self.primary_provider = self.image_config.get('primary_provider', 'runninghub')  
-        self.fallback_providers = self.image_config.get('fallback_providers', ['openai'])
+        self.fallback_providers = self.image_config.get('fallback_providers', [])
         
         # 默认样式提示词
         self._load_style_prompts()
@@ -157,72 +156,82 @@ class ImageGenerator:
             # 构建完整提示词
             full_prompt = self._build_full_prompt(request)
             
-            # 选择提供商
-            providers_to_try = [provider] if provider else [self.primary_provider] + self.fallback_providers
+            # 使用RunningHub生成图像
+            provider_name = provider if provider else self.primary_provider
+            
+            if provider_name != 'runninghub':
+                raise ValueError(f"Unsupported image provider: {provider_name}. Only 'runninghub' is supported.")
+            
+            if not self.api_keys.get('runninghub'):
+                raise ValueError("No API key configured for RunningHub")
+            
+            self.logger.info(f"Generating image with RunningHub: {request.prompt[:50]}...")
+            
+            # 获取重试配置
+            max_retries = self.config.get('general.api_max_retries', 3)
+            retry_delay = self.config.get('general.retry_delay', 2)
             
             last_error = None
-            for provider_name in providers_to_try:
-                if not self.api_keys.get(provider_name):
-                    self.logger.warning(f"No API key for provider: {provider_name}")
-                    continue
-                
+            for attempt in range(max_retries + 1):  # +1 because we want to try max_retries times plus the initial attempt
                 try:
-                    self.logger.info(f"Generating image with {provider_name}: {request.prompt[:50]}...")
+                    if attempt > 0:
+                        self.logger.info(f"RunningHub retry attempt {attempt}/{max_retries} for image generation...")
+                        await asyncio.sleep(retry_delay * attempt)  # 增量延迟
                     
-                    if provider_name == 'runninghub':
-                        result = await self._generate_with_runninghub(request, full_prompt)
-                    elif provider_name == 'openai':
-                        result = await self._generate_with_openai(request, full_prompt)
-                    elif provider_name == 'stability':
-                        result = await self._generate_with_stability(request, full_prompt)
-                    else:
-                        continue
+                    result = await self._generate_with_runninghub(request, full_prompt)
                     
-                    # 缓存结果
-                    cache_data = {
-                        'image_data': result.image_data,
-                        'prompt': result.prompt,
-                        'width': result.width,
-                        'height': result.height,
-                        'file_size': result.file_size,
-                        'provider': result.provider,
-                        'model': result.model
-                    }
-                    
-                    # 缓存已禁用
-                    
-                    # 记录日志
-                    # 保存图像文件（避免跨任务复用/覆盖：使用场景ID+毫秒时间戳+内容指纹命名）
-                    custom_filename = None
-                    try:
-                        content_digest = hashlib.md5(result.image_data).hexdigest()[:8]
-                        millis = int(time.time() * 1000)
-                        if request.scene_id:
-                            custom_filename = f"img_{request.scene_id}_{provider_name}_{millis}_{content_digest}.png"
-                        else:
-                            custom_filename = None
-                    except Exception:
-                        custom_filename = None
-                    file_path = self.save_image(result, filename=custom_filename) if custom_filename else self.save_image(result)
-                    result.file_path = file_path
-                    
-                    logger = self.config.get_logger('story_generator')
-                    logger.info(f"Media generation - Type: image, Provider: {provider_name}, "
-                               f"Processing time: {result.generation_time:.2f}s, "
-                               f"File size: {result.file_size} bytes")
-                    
-                    self.logger.info(f"Generated image successfully with {provider_name}: {result.file_size / 1024:.1f}KB in {result.generation_time:.2f}s")
-                    self.logger.info(f"Image saved to: {file_path}")
-                    
-                    return result
+                    # 成功生成，跳出重试循环
+                    break
                     
                 except Exception as e:
-                    self.logger.error(f"Failed to generate image with {provider_name}: {e}")
                     last_error = e
+                    self.logger.warning(f"RunningHub attempt {attempt + 1} failed: {e}")
+                    
+                    # 如果是最后一次尝试，抛出错误
+                    if attempt == max_retries:
+                        self.logger.error(f"RunningHub failed after {max_retries + 1} attempts. Last error: {e}")
+                        raise e
+                    
                     continue
             
-            # 所有提供商都失败了
-            raise Exception(f"All image providers failed. Last error: {last_error}")
+            # 处理生成结果
+            # 缓存结果
+            cache_data = {
+                'image_data': result.image_data,
+                'prompt': result.prompt,
+                'width': result.width,
+                'height': result.height,
+                'file_size': result.file_size,
+                'provider': result.provider,
+                'model': result.model
+            }
+            
+            # 缓存已禁用
+            
+            # 记录日志
+            # 保存图像文件（避免跨任务复用/覆盖：使用场景ID+毫秒时间戳+内容指纹命名）
+            custom_filename = None
+            try:
+                content_digest = hashlib.md5(result.image_data).hexdigest()[:8]
+                millis = int(time.time() * 1000)
+                if request.scene_id:
+                    custom_filename = f"img_{request.scene_id}_{provider_name}_{millis}_{content_digest}.png"
+                else:
+                    custom_filename = None
+            except Exception:
+                custom_filename = None
+            file_path = self.save_image(result, filename=custom_filename) if custom_filename else self.save_image(result)
+            result.file_path = file_path
+            
+            logger = self.config.get_logger('story_generator')
+            logger.info(f"Media generation - Type: image, Provider: {provider_name}, "
+                       f"Processing time: {result.generation_time:.2f}s, "
+                       f"File size: {result.file_size} bytes")
+            
+            self.logger.info(f"Generated image successfully with RunningHub: {result.file_size / 1024:.1f}KB in {result.generation_time:.2f}s")
+            self.logger.info(f"Image saved to: {file_path}")
+            
+            return result
             
         except Exception as e:
             processing_time = time.time() - start_time
@@ -568,7 +577,7 @@ class ImageGenerator:
         return asyncio.run(self.generate_image_async(request, provider))
     
     async def batch_generate_images(self, requests: List[ImageGenerationRequest], 
-                                  max_concurrent: int = 3,
+                                  max_concurrent: int = 5,
                                   animation_strategy: Optional[str] = None) -> List[Optional[GeneratedImage]]:
         """
         批量生成图像

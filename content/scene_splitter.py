@@ -20,7 +20,8 @@ class Scene:
     """单个场景"""
     sequence: int              # 场景序号
     content: str              # 场景内容文本
-    image_prompt: str         # 图像提示词
+    image_prompt: str         # 图像提示词 (文生图用)
+    video_prompt: str         # 视频提示词 (图生视频用)
     duration_seconds: float   # 时长（秒）
     animation_type: str       # 动画类型
     subtitle_text: str        # 字幕文本
@@ -342,12 +343,24 @@ Ahora por favor divide el siguiente guión de historia histórica:
             if not response:
                 raise ValueError("Empty response from LLM")
             
+            # 记录响应信息用于调试
+            self.logger.debug(f"LLM Response length: {len(response)}")
+            
             # 解析响应
             scenes = self._parse_scenes_response(response, request)
             
-            # 验证场景数量
-            if len(scenes) != request.target_scene_count:
-                self.logger.warning(f"Expected {request.target_scene_count} scenes, got {len(scenes)}")
+            # 记录实际生成的场景数量 - 不设置任何限制，完全基于内容自然分割
+            self.logger.info(f"Generated {len(scenes)} scenes based on content structure")
+            
+            # 只做基本的数据完整性检查
+            if len(scenes) == 0:
+                raise ValueError("No scenes were generated from the script")
+            
+            # 提供信息性提示，但不限制场景数量
+            if len(scenes) == 1:
+                self.logger.info("Single scene generated - this is fine for short content")
+            elif len(scenes) > 20:
+                self.logger.info(f"Large number of scenes ({len(scenes)}) - this suggests rich, detailed content")
             
             # 使用专门的图像提示词生成器生成高质量提示词
             scenes = await self._generate_image_prompts_for_scenes(scenes, request)
@@ -440,9 +453,18 @@ Ahora por favor divide el siguiente guión de historia histórica:
             json_content = self._extract_json_from_response(response)
             
             if not json_content:
+                self.logger.error(f"Failed to extract JSON from response. Response length: {len(response)}")
+                self.logger.error(f"Response preview (first 1000 chars): {response[:1000]}")
                 raise ValueError("No valid JSON found in response")
             
-            data = json.loads(json_content)
+            self.logger.debug(f"Extracted JSON content: {json_content[:200]}...")
+            
+            try:
+                data = json.loads(json_content)
+            except json.JSONDecodeError as e:
+                self.logger.error(f"JSON decode error: {e}")
+                self.logger.error(f"Invalid JSON content: {json_content}")
+                raise ValueError(f"Invalid JSON format: {e}")
             
             if 'scenes' not in data:
                 raise ValueError("Missing 'scenes' key in response")
@@ -454,6 +476,7 @@ Ahora por favor divide el siguiente guión de historia histórica:
                     sequence=scene_data.get('sequence', i + 1),
                     content=scene_data.get('content', ''),
                     image_prompt=scene_data.get('image_prompt', ''),
+                    video_prompt=scene_data.get('video_prompt', ''),  # 新增视频提示词字段
                     duration_seconds=scene_data.get('duration_seconds', request.scene_duration),
                     animation_type=scene_data.get('animation_type', '轻微放大'),
                     subtitle_text=scene_data.get('subtitle_text', scene_data.get('content', ''))
@@ -483,24 +506,31 @@ Ahora por favor divide el siguiente guión de historia histórica:
         """从响应中提取JSON内容"""
         import re
         
-        # 查找```json...```格式（修复正则表达式）
+        self.logger.debug(f"Extracting JSON from response (length: {len(response)})")
+        
+        # 方法1: 查找```json...```格式
         json_match = re.search(r'```json\s*\n?(.*?)\n?```', response, re.DOTALL | re.IGNORECASE)
         if json_match:
-            return json_match.group(1).strip()
+            content = json_match.group(1).strip()
+            self.logger.debug("Found JSON in ```json``` block")
+            return content
         
-        # 查找```...```格式（可能没有标明json）
+        # 方法2: 查找```...```格式（可能没有标明json）
         code_match = re.search(r'```\s*\n?(.*?)\n?```', response, re.DOTALL)
         if code_match:
             content = code_match.group(1).strip()
             if content.startswith('{') and content.endswith('}'):
+                self.logger.debug("Found JSON in ``` block")
                 return content
         
-        # 查找直接的JSON对象（更精确的匹配）
-        json_obj_match = re.search(r'(\{[^{}]*"scenes"[^{}]*\[.*?\][^{}]*\})', response, re.DOTALL)
+        # 方法3: 查找包含"scenes"的JSON对象（更宽松的匹配）
+        json_obj_match = re.search(r'(\{.*?"scenes".*?\[.*?\].*?\})', response, re.DOTALL)
         if json_obj_match:
-            return json_obj_match.group(1)
+            content = json_obj_match.group(1)
+            self.logger.debug("Found JSON with scenes key")
+            return content
         
-        # 最后尝试简单的大括号匹配
+        # 方法4: 寻找完整的JSON大括号匹配
         start_pos = response.find('{')
         if start_pos != -1:
             bracket_count = 0
@@ -510,8 +540,21 @@ Ahora por favor divide el siguiente guión de historia histórica:
                 elif char == '}':
                     bracket_count -= 1
                     if bracket_count == 0:
-                        return response[start_pos:i+1]
+                        candidate = response[start_pos:i+1]
+                        # 验证这确实包含scenes
+                        if '"scenes"' in candidate:
+                            self.logger.debug("Found JSON through bracket matching")
+                            return candidate
         
+        # 方法5: 尝试多个JSON对象的情况
+        json_objects = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
+        for obj in json_objects:
+            if '"scenes"' in obj:
+                self.logger.debug("Found JSON in multiple objects search")
+                return obj
+        
+        # 记录响应内容的前500字符用于调试
+        self.logger.warning(f"No JSON found in response. Response preview: {response[:500]}")
         return None
     
     # FALLBACK LOGIC REMOVED - 不再使用退化逻辑掩盖问题
@@ -904,6 +947,7 @@ Ahora por favor divide el siguiente guión de historia histórica:
             'sequence': scene.sequence,
             'content': scene.content,
             'image_prompt': scene.image_prompt,
+            'video_prompt': scene.video_prompt,  # 添加视频提示词字段
             'duration_seconds': scene.duration_seconds,
             'animation_type': scene.animation_type,
             'subtitle_text': scene.subtitle_text

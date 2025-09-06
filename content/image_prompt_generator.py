@@ -90,8 +90,12 @@ class ImagePromptGenerator:
             if cached_result:
                 self.logger.info(f"Cache hit for image prompt generation: {request.language}")
                 cached_result['generation_time'] = time.time() - start_time
-                # 重构Scene对象
-                scenes = [Scene(**scene_data) for scene_data in cached_result['scenes']]
+                # 重构Scene对象，确保video_prompt字段存在
+                scenes = []
+                for scene_data in cached_result['scenes']:
+                    if 'video_prompt' not in scene_data:
+                        scene_data['video_prompt'] = ''
+                    scenes.append(Scene(**scene_data))
                 cached_result['scenes'] = scenes
                 return ImagePromptResult(**cached_result)
             
@@ -254,6 +258,7 @@ class ImagePromptGenerator:
                     sequence=original_scene.sequence,
                     content=original_scene.content,
                     image_prompt=image_prompt,
+                    video_prompt=getattr(original_scene, 'video_prompt', ''),  # 保持原有的video_prompt
                     duration_seconds=original_scene.duration_seconds,
                     animation_type=original_scene.animation_type,
                     subtitle_text=original_scene.subtitle_text
@@ -325,6 +330,7 @@ class ImagePromptGenerator:
             'sequence': scene.sequence,
             'content': scene.content,
             'image_prompt': scene.image_prompt,
+            'video_prompt': getattr(scene, 'video_prompt', ''),
             'duration_seconds': scene.duration_seconds,
             'animation_type': scene.animation_type,
             'subtitle_text': scene.subtitle_text

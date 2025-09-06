@@ -80,7 +80,7 @@ class ConfigManager:
                 "output_dir": "output",
                 "temp_dir": "output/temp", 
                 "log_level": "INFO",
-                "max_concurrent_tasks": 3,  # 对应原工作流批处理并发数
+                "max_concurrent_tasks": 5,  # 对应原工作流批处理并发数
                 "supported_languages": ["zh", "en", "es"],
                 "default_language": "zh"
             },

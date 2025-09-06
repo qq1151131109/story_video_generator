@@ -15,6 +15,7 @@ from content.scene_splitter import Scene, SceneSplitResult
 from content.character_analyzer import Character, CharacterAnalysisResult
 from media.image_generator import ImageGenerator, ImageGenerationRequest, GeneratedImage
 from media.audio_generator import AudioGenerator, AudioGenerationRequest, GeneratedAudio
+from media.text_to_video_generator import TextToVideoGenerator, TextToVideoRequest, TextToVideoResult
 
 @dataclass
 class MediaGenerationRequest:
@@ -30,8 +31,9 @@ class MediaGenerationRequest:
 class SceneMedia:
     """场景媒体资源"""
     scene: Scene                     # 场景信息
-    image: GeneratedImage           # 场景图像
-    audio: GeneratedAudio           # 场景音频
+    image: Optional[GeneratedImage] = None           # 场景图像（传统模式）
+    audio: Optional[GeneratedAudio] = None           # 场景音频
+    video: Optional[TextToVideoResult] = None        # 一体化视频（新模式）
     
 @dataclass
 class MediaGenerationResult:
@@ -65,12 +67,47 @@ class MediaPipeline:
         self.image_generator = ImageGenerator(config_manager, None, file_manager)
         self.audio_generator = AudioGenerator(config_manager, None, file_manager)
         
+        # 检查是否启用一体化文生视频
+        self.enable_integrated_generation = self._check_integrated_generation_support()
+        
+        if self.enable_integrated_generation:
+            try:
+                self.text_to_video_generator = TextToVideoGenerator(config_manager, None, file_manager)
+                self.logger.info("TextToVideoGenerator initialized successfully")
+            except Exception as e:
+                raise RuntimeError(f"TextToVideoGenerator initialization failed: {e}. Please check RunningHub API configuration.")
+        else:
+            raise RuntimeError("Integrated generation is disabled. Please enable 'media.enable_integrated_generation' in configuration.")
+        
         # 获取配置
         self.media_config = config_manager.get('media', {})
         self.image_config = self.media_config.get('image', {})
         self.audio_config = self.media_config.get('audio', {})
         
-        self.logger.info("Media pipeline initialized with image and audio generators")
+        generation_mode = "integrated text-to-video" if self.enable_integrated_generation else "traditional image+audio"
+        self.logger.info(f"Media pipeline initialized with {generation_mode} generation")
+    
+    def _check_integrated_generation_support(self) -> bool:
+        """检查是否支持一体化文生视频生成"""
+        try:
+            # 检查RunningHub API密钥
+            runninghub_key = self.config.get_api_key('runninghub')
+            if not runninghub_key:
+                self.logger.info("RunningHub API key not configured, using traditional mode")
+                return False
+            
+            # 检查配置中是否启用一体化模式
+            enable_integrated = self.config.get('media.enable_integrated_generation', True)
+            if not enable_integrated:
+                self.logger.info("Integrated generation disabled in configuration")
+                return False
+            
+            self.logger.info("Integrated text-to-video generation enabled")
+            return True
+            
+        except Exception as e:
+            self.logger.warning(f"Error checking integrated generation support: {e}")
+            return False
     
     async def generate_media_async(self, request: MediaGenerationRequest) -> MediaGenerationResult:
         """
@@ -90,8 +127,8 @@ class MediaPipeline:
             # 并行任务列表
             tasks = []
             
-            # 任务1：生成场景媒体
-            scene_task = self._generate_scene_media(request.scenes, request.language)
+            # 任务1：生成场景媒体（一体化文生视频模式）
+            scene_task = self._generate_integrated_scene_media(request.scenes, request.language)
             tasks.append(('scenes', scene_task))
             
             # 任务2：生成角色图像
@@ -180,7 +217,7 @@ class MediaPipeline:
             image_requests.append((scene, image_req))
         
         # 使用批量生成方法（带并发控制）
-        max_concurrent = self.config.get('general.max_concurrent_tasks', 3)
+        max_concurrent = self.config.get('general.max_concurrent_tasks', 5)
         
         # 批量生成图像（返回与输入同序，失败为None）
         image_gen_requests = [req for _, req in image_requests]
@@ -211,6 +248,115 @@ class MediaPipeline:
                 self.logger.error(f"Scene {i+1} media combination failed: {e}")
         
         self.logger.info(f"Generated {len(scene_media)} complete scene media out of {len(scenes)} scenes")
+        return scene_media
+    
+    async def _generate_integrated_scene_media(self, scenes: List[Scene], language: str) -> List[SceneMedia]:
+        """使用一体化文生视频生成场景媒体"""
+        if not self.text_to_video_generator:
+            raise RuntimeError("TextToVideoGenerator not available, cannot generate videos. Please check RunningHub API configuration.")
+        
+        self.logger.info(f"Generating integrated text-to-videos for {len(scenes)} scenes...")
+        
+        # 准备文生视频请求
+        video_requests = []
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        for idx, scene in enumerate(scenes, start=1):
+            # 使用场景的图像提示词和视频提示词
+            image_prompt = scene.image_prompt if scene.image_prompt else f"历史场景：{scene.content}"
+            video_prompt = scene.video_prompt if scene.video_prompt else ""
+            
+            # 一体化模式固定使用720x1280分辨率（工作流优化分辨率）
+            video_req = TextToVideoRequest(
+                image_prompt=image_prompt,   # 文生图提示词 (场景描述)
+                video_prompt=video_prompt,   # 图生视频提示词 (动作描述) 
+                negative_prompt="blurry, low quality, distorted, bad anatomy",
+                width=720,
+                height=1280,
+                fps=31,
+                duration=3.0,
+                style="ancient_horror",
+                scene_id=f"scene_{idx}_{timestamp}"
+            )
+            video_requests.append((scene, video_req))
+        
+        # 使用批量生成方法（带并发控制）
+        max_concurrent = min(self.config.get('general.max_concurrent_tasks', 3), 3)  # 限制并发以避免API过载
+        
+        # 批量生成一体化视频
+        video_gen_requests = [req for _, req in video_requests]
+        
+        try:
+            generated_videos = await self.text_to_video_generator.batch_generate_videos(
+                video_gen_requests, max_concurrent
+            )
+        except Exception as e:
+            # 一体化视频生成完全失败
+            error_msg = f"Integrated text-to-video generation completely failed: {e}"
+            self.logger.error(error_msg)
+            
+            # 检查是否允许网络错误时降级
+            allow_fallback = self.config.get('media.allow_fallback_on_network_error', False)
+            is_network_error = "Cannot connect to host" in str(e) or "Connection" in str(e)
+            
+            if is_network_error and allow_fallback:
+                self.logger.warning(f"Network connection failed, falling back to traditional image generation mode")
+                self.logger.warning(f"This is a development/testing fallback. In production, please ensure RunningHub API connectivity.")
+                return await self._generate_scene_media(scenes, language)
+            elif is_network_error:
+                raise RuntimeError(f"RunningHub API connection failed. Please check:\n"
+                                 f"1. Network connectivity to api.runninghub.cn\n"
+                                 f"2. RunningHub API key validity\n"
+                                 f"3. Firewall settings\n"
+                                 f"Original error: {e}")
+            else:
+                raise RuntimeError(error_msg)
+        
+        # 检查生成结果
+        successful_videos = [v for v in generated_videos if v is not None]
+        if not successful_videos:
+            # 检查是否允许降级
+            allow_fallback = self.config.get('media.allow_fallback_on_network_error', False)
+            if allow_fallback:
+                self.logger.warning(f"All integrated video generations failed, falling back to traditional image generation mode")
+                self.logger.warning(f"This is a development/testing fallback. In production, please ensure RunningHub API connectivity.")
+                return await self._generate_scene_media(scenes, language)
+            else:
+                raise RuntimeError(f"All {len(scenes)} integrated video generations failed. "
+                                 f"Please check RunningHub API configuration and network connectivity.")
+        
+        # 组合结果
+        scene_media = []
+        
+        for i, scene in enumerate(scenes):
+            try:
+                video_result = generated_videos[i] if i < len(generated_videos) else None
+                
+                if video_result:
+                    # 使用一体化视频结果创建SceneMedia
+                    scene_media.append(SceneMedia(
+                        scene=scene,
+                        image=None,  # 一体化模式不需要单独的图像
+                        audio=None,  # 音频仍由主程序统一生成
+                        video=video_result  # 一体化视频结果
+                    ))
+                    self.logger.info(f"Scene {i+1} integrated video generation successful: "
+                                   f"{video_result.file_size/1024:.1f}KB, {video_result.duration:.1f}s")
+                else:
+                    self.logger.error(f"Scene {i+1} integrated video generation failed")
+                    
+            except Exception as e:
+                self.logger.error(f"Scene {i+1} integrated media combination failed: {e}")
+        
+        success_rate = len(scene_media) / len(scenes) * 100
+        self.logger.info(f"Generated {len(scene_media)} integrated scene videos out of {len(scenes)} scenes ({success_rate:.1f}% success rate)")
+        
+        # 如果成功率太低，给出警告
+        if success_rate < 50:
+            self.logger.warning(f"Low success rate ({success_rate:.1f}%) for integrated video generation. "
+                              f"Consider checking API limits and network stability.")
+        
         return scene_media
     
     
@@ -309,7 +455,7 @@ class MediaPipeline:
         return asyncio.run(self.generate_media_async(request))
     
     async def batch_generate_media(self, requests: List[MediaGenerationRequest], 
-                                 max_concurrent: int = 2) -> List[MediaGenerationResult]:
+                                 max_concurrent: int = 5) -> List[MediaGenerationResult]:
         """
         批量媒体生成
         
