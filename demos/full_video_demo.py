@@ -22,7 +22,6 @@ from tools.load_env import load_env_file
 load_env_file()
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
 from utils.logger import setup_logging
 from content.script_generator import ScriptGenerator, ScriptGenerationRequest
@@ -32,7 +31,7 @@ from content.theme_extractor import ThemeExtractor, ThemeExtractRequest
 from media.image_generator import ImageGenerator, ImageGenerationRequest
 from media.audio_generator import AudioGenerator, AudioGenerationRequest, GeneratedAudio
 from media.character_image_generator import CharacterImageGenerator, CharacterImageRequest
-from video.subtitle_processor import SubtitleProcessor, SubtitleRequest, SubtitleSegment
+from video.subtitle_processor import SubtitleProcessor, SubtitleProcessorRequest, SubtitleSegment
 from video.title_subtitle_processor import TitleSubtitleProcessor, TitleSubtitleRequest
 # 旧动画处理器已移除，演示改用增强动画处理器
 from video.enhanced_animation_processor import EnhancedAnimationProcessor, AnimationRequest
@@ -301,7 +300,6 @@ async def main():
     # 初始化系统组件
     print("📋 初始化系统组件...")
     config = ConfigManager()
-    cache = CacheManager()
     file_manager = FileManager()
     setup_logging()
     
@@ -535,7 +533,7 @@ async def main():
                 scene_char_weight = len(scene.content) / total_chars if total_chars > 0 else 1.0 / len(scene_result.scenes)
                 scene_duration = total_audio_duration * scene_char_weight
                 
-                subtitle_request = SubtitleRequest(
+                subtitle_request = SubtitleProcessorRequest(
                     text=scene.subtitle_text or scene.content,
                     scene_duration=scene_duration,  # 使用计算出的时长
                     language=language,

@@ -17,7 +17,6 @@ import io
 import hashlib
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager  
 from utils.file_manager import FileManager
 
 @dataclass
@@ -58,9 +57,8 @@ class ImageGenerator:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager, file_manager: FileManager):
+                 file_manager: FileManager):
         self.config = config_manager
-        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.media')
         
@@ -77,7 +75,7 @@ class ImageGenerator:
         
         # 提供商优先级
         self.primary_provider = self.image_config.get('primary_provider', 'runninghub')  
-        self.fallback_providers = self.image_config.get('fallback_providers', [])
+        # fallback机制已移除，只使用主要提供商
         
         # 默认样式提示词
         self._load_style_prompts()
@@ -696,7 +694,7 @@ class ImageGenerator:
         return {
             'providers': {
                 'primary': self.primary_provider,
-                'fallback': self.fallback_providers,
+                # fallback机制已移除
                 'available_keys': [k for k, v in self.api_keys.items() if v]
             },
             # 缓存已删除
@@ -708,4 +706,4 @@ class ImageGenerator:
     
     def __str__(self) -> str:
         """字符串表示"""
-        return f"ImageGenerator(primary={self.primary_provider}, fallback={self.fallback_providers})"
+        return f"ImageGenerator(primary={self.primary_provider})"

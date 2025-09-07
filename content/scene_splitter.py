@@ -11,9 +11,8 @@ import logging
 from dataclasses import dataclass
 
 from core.config_manager import ConfigManager, ModelConfig
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
-from utils.llm_client_manager import LLMClientManager
+from utils.enhanced_llm_manager import EnhancedLLMManager
 
 @dataclass
 class Scene:
@@ -57,9 +56,8 @@ class SceneSplitter:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager, file_manager: FileManager):
+                 file_manager: FileManager):
         self.config = config_manager
-        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
@@ -72,8 +70,9 @@ class SceneSplitter:
         # 图像提示词生成器（延迟初始化避免循环导入）
         self._image_prompt_generator = None
         
-        # 配置OpenAI客户端
-        self.llm_manager = LLMClientManager(config_manager)
+        # 使用统一的增强LLM管理器
+        self.llm_manager = EnhancedLLMManager(config_manager)
+        self.logger.info("✅ 使用增强LLM管理器 (统一架构)")
         
         # 加载提示词模板
         self._load_prompt_templates()
@@ -84,7 +83,7 @@ class SceneSplitter:
         if self._image_prompt_generator is None:
             from .image_prompt_generator import ImagePromptGenerator
             self._image_prompt_generator = ImagePromptGenerator(
-                self.config, None, self.file_manager
+                self.config, self.file_manager
             )
             self.logger.info("Initialized image prompt generator")
         return self._image_prompt_generator
@@ -343,11 +342,15 @@ Ahora por favor divide el siguiente guión de historia histórica:
             if not response:
                 raise ValueError("Empty response from LLM")
             
-            # 记录响应信息用于调试
-            self.logger.debug(f"LLM Response length: {len(response)}")
-            
-            # 解析响应
-            scenes = self._parse_scenes_response(response, request)
+            # 检查响应类型 - 处理增强LLM管理器直接返回Scene列表的情况
+            if isinstance(response, list):
+                # 增强LLM管理器成功返回了Scene列表
+                scenes = response
+                self.logger.info(f"✅ 直接获得结构化场景列表: {len(scenes)} scenes")
+            else:
+                # 传统字符串响应，需要解析
+                self.logger.debug(f"LLM Response length: {len(response)}")
+                scenes = self._parse_scenes_response(response, request)
             
             # 记录实际生成的场景数量 - 不设置任何限制，完全基于内容自然分割
             self.logger.info(f"Generated {len(scenes)} scenes based on content structure")
@@ -410,23 +413,145 @@ Ahora por favor divide el siguiente guión de historia histórica:
             
             raise
     
+    def _split_prompt(self, prompt: str) -> tuple[str, str]:
+        """将单个prompt分离为system_prompt和user_prompt"""
+        
+        # 尝试从prompt中找到合适的分割点
+        lines = prompt.split('\n')
+        
+        # 查找指示用户输入开始的标志
+        user_start_markers = ['故事内容:', '请分割以下故事:', '脚本内容:', '故事:', '内容:']
+        
+        system_lines = []
+        user_lines = []
+        found_user_start = False
+        
+        for line in lines:
+            line_clean = line.strip()
+            if not found_user_start:
+                # 检查是否找到用户内容开始标志
+                for marker in user_start_markers:
+                    if marker in line_clean:
+                        found_user_start = True
+                        user_lines.append(line)
+                        break
+                if not found_user_start:
+                    system_lines.append(line)
+            else:
+                user_lines.append(line)
+        
+        # 如果没有找到明确的分割点，采用简单的策略
+        if not user_lines:
+            # 将前80%作为系统提示词，后20%作为用户输入
+            split_point = int(len(lines) * 0.8)
+            system_lines = lines[:split_point]
+            user_lines = lines[split_point:]
+        
+        system_prompt = '\n'.join(system_lines).strip()
+        user_prompt = '\n'.join(user_lines).strip()
+        
+        # 确保至少有基本的系统提示词
+        if not system_prompt:
+            system_prompt = "你是专业的故事场景分割专家。将输入的故事分割为多个场景，每个场景3秒钟。"
+        
+        # 确保至少有用户输入
+        if not user_prompt:
+            user_prompt = prompt
+        
+        return system_prompt, user_prompt
+    
     async def _call_llm_api(self, prompt: str) -> str:
         """
-        调用LLM API
+        调用LLM API - 优先使用增强LLM管理器 (OpenAI Structured Output + 多层降级)
         
         Args:
             prompt: 提示词
         
         Returns:
-            str: LLM响应
+            str or List[Scene]: LLM响应 或 结构化Scene列表
         """
         try:
-            content = await self.llm_manager.call_llm_with_fallback(
-                prompt=prompt,
-                task_type='scene_splitting',
-                temperature=self.llm_config.temperature,
-                max_tokens=self.llm_config.max_tokens
-            )
+            # 优先尝试增强LLM管理器 (OpenAI Structured Output + 多层降级)
+            # 使用统一的增强LLM管理器
+            try:
+                self.logger.info("🚀 使用增强LLM管理器 (OpenAI GPT-4.1 + Structured Output)")
+                
+                # 从prompt中分离系统提示词和用户提示词
+                system_prompt, user_prompt = self._split_prompt(prompt)
+                
+                structured_output = await self.llm_manager.generate_structured_output(
+                    task_type='scene_splitting',
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_retries=2
+                )
+                
+                if hasattr(structured_output, 'scenes') and structured_output.scenes:
+                    # 转换为原有的Scene对象格式
+                    scenes = []
+                    for scene_data in structured_output.scenes:
+                        scene = Scene(
+                            sequence=scene_data.sequence,
+                            content=scene_data.content,
+                            image_prompt="",  # 后续生成
+                            video_prompt="", # 后续生成  
+                            duration_seconds=scene_data.duration,
+                            animation_type="center_zoom_in",
+                            subtitle_text=scene_data.content
+                        )
+                        scenes.append(scene)
+                    
+                    self.logger.info(f"✅ 增强LLM管理器成功: {len(scenes)} scenes (OpenAI GPT-4.1)")
+                    return scenes
+                        
+            except Exception as e:
+                self.logger.warning(f"⚠️ 增强LLM管理器失败: {e}")
+                # 继续尝试传统方法
+            
+            # 降级：尝试传统结构化输出
+            try:
+                self.logger.info("🔄 降级到传统结构化输出...")
+                # 从prompt中分离系统提示词和用户提示词
+                system_prompt, user_prompt = self._split_prompt(prompt)
+                
+                structured_output = await self.llm_manager.generate_structured_output(
+                    task_type='scene_splitting',
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_retries=2
+                )
+                
+                if hasattr(structured_output, 'scenes') and structured_output.scenes:
+                    # 转换为原有的Scene对象格式
+                    scenes = []
+                    for scene_data in structured_output.scenes:
+                        scene = Scene(
+                            sequence=scene_data.sequence,
+                            content=scene_data.content,
+                            image_prompt="",  # 后续生成
+                            video_prompt="", # 后续生成
+                            duration_seconds=getattr(scene_data, 'duration', 3.0),
+                            animation_type="center_zoom_in",
+                            subtitle_text=scene_data.content
+                        )
+                        scenes.append(scene)
+                    
+                    self.logger.info(f"✅ 传统结构化输出成功: {len(scenes)} scenes")
+                    return scenes
+                else:
+                    # 降级到文本解析
+                    content = str(structured_output)
+                    
+            except Exception as e:
+                self.logger.warning(f"🔄 传统结构化输出失败，降级到文本解析: {e}")
+                
+                # 最终降级：传统文本生成
+                content = await self.llm_manager.call_llm_with_fallback(
+                    prompt=prompt,
+                    task_type='scene_splitting',
+                    temperature=self.llm_config.temperature,
+                    max_tokens=self.llm_config.max_tokens
+                )
             
             if not content:
                 raise ValueError("Empty response from all LLM providers")

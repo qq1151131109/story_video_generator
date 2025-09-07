@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from core.config_manager import ConfigManager
 from utils.file_manager import FileManager
 from utils.subtitle_utils import SubtitleUtils
+from utils.font_manager import FontManager
 
 
 @dataclass
@@ -107,6 +108,9 @@ class SubtitleEngine:
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.subtitle_engine')
         
+        # 初始化字体管理器
+        self.font_manager = FontManager(config_manager, file_manager)
+        
         # 加载配置
         self.subtitle_config = self._load_subtitle_config()
         
@@ -119,7 +123,7 @@ class SubtitleEngine:
         # 对齐组件（延迟初始化）
         self._alignment_manager = None
         
-        self.logger.info("SubtitleEngine initialized with unified architecture")
+        self.logger.info("SubtitleEngine initialized with unified architecture and font manager")
     
     def _load_subtitle_config(self) -> Dict[str, Any]:
         """加载统一字幕配置"""
@@ -169,7 +173,8 @@ class SubtitleEngine:
                 background_enabled=False,
                 position='bottom',
                 alignment=2,
-                margin_v=config.get('margin_v', 80)
+                margin_v=config.get('margin_v', 80),
+                font_family='noto_sans_sc'  # 使用Google Fonts思源黑体
             ),
             
             'jianying': SubtitleStyle(
@@ -441,6 +446,62 @@ class SubtitleEngine:
             'chars_per_second': total_chars / total_duration if total_duration > 0 else 0,
             'avg_confidence': sum(seg.confidence for seg in segments) / len(segments)
         }
+    
+    async def get_font_config(self, language: str = "zh", style: str = "sans") -> Dict[str, str]:
+        """
+        获取动态字体配置
+        
+        Args:
+            language: 语言代码 (zh/en/es)
+            style: 字体风格 (sans/serif/handwriting)
+            
+        Returns:
+            FFmpeg字幕渲染的字体配置
+        """
+        try:
+            # 确保字体可用
+            await self.font_manager.ensure_font_available(language, style)
+            
+            # 获取字体配置
+            font_config = self.font_manager.get_ffmpeg_font_config(language, style)
+            
+            self.logger.info(f"✅ 字体配置准备完成: {font_config['fontfile']}")
+            return font_config
+            
+        except Exception as e:
+            self.logger.error(f"字体配置获取失败: {e}")
+            # 返回fallback配置
+            return {
+                'fontfile': 'sans-serif',
+                'fontsize': self.config.get('subtitle.main_font_size', 48),
+                'fontcolor': self.config.get('subtitle.main_color', '#FFFFFF'),
+                'bordercolor': self.config.get('subtitle.main_border_color', '#000000'),
+                'borderw': self.config.get('subtitle.outline', 3)
+            }
+    
+    def update_style_with_font(self, style_name: str, language: str = "zh") -> SubtitleStyle:
+        """
+        更新字幕样式的字体配置
+        
+        Args:
+            style_name: 样式名称
+            language: 语言代码
+            
+        Returns:
+            更新后的样式对象
+        """
+        if style_name not in self.styles:
+            style_name = 'main'  # fallback到主样式
+        
+        style = self.styles[style_name]
+        
+        # 根据语言选择合适的字体
+        if language == "zh":
+            style.font_family = "noto_sans_sc"
+        elif language in ["en", "es"]: 
+            style.font_family = "noto_sans_sc"  # Noto Sans也支持英文
+        
+        return style
     
     def save_subtitle_file(self, segments: List[SubtitleSegment], output_path: str, 
                           format: str = "srt") -> str:

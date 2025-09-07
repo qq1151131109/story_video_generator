@@ -80,7 +80,7 @@ async def test_image_to_video_generation():
     # 创建测试请求
     test_request = ImageToVideoRequest(
         image_path=str(test_image),
-        desc_prompt="古代皇帝坐在龙椅上，威严庄重，古代宫殿背景，昏暗灯光",
+        image_prompt="古代皇帝坐在龙椅上，威严庄重，古代宫殿背景，昏暗灯光",
         duration_seconds=3.0,
         width=720,
         height=1280

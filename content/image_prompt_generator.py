@@ -11,9 +11,8 @@ import logging
 from dataclasses import dataclass
 
 from core.config_manager import ConfigManager, ModelConfig
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
-from utils.llm_client_manager import LLMClientManager
+from utils.enhanced_llm_manager import EnhancedLLMManager
 from .scene_splitter import Scene
 
 @dataclass
@@ -43,9 +42,8 @@ class ImagePromptGenerator:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager: CacheManager, file_manager: FileManager):
+                 file_manager: FileManager):
         self.config = config_manager
-        self.cache = cache_manager  # May be None
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
@@ -56,7 +54,8 @@ class ImagePromptGenerator:
         self.llm_config = self.config.get_llm_config('image_prompt_generation')
         
         # 初始化多提供商LLM客户端管理器
-        self.llm_manager = LLMClientManager(config_manager)
+        self.llm_manager = EnhancedLLMManager(config_manager)
+        self.logger.info("✅ 使用增强LLM管理器 (统一架构)")
         
         # 加载提示词模板
         self._load_prompt_templates()
@@ -77,27 +76,7 @@ class ImagePromptGenerator:
         start_time = time.time()
         
         try:
-            # 检查缓存
-            cache_key_data = {
-                'scenes_content': [scene.content for scene in request.scenes],
-                'language': request.language,
-                'style': request.style
-            }
-            
-            cache_key = self.cache.get_cache_key(cache_key_data) if self.cache else None
-            
-            cached_result = self.cache.get('image_prompts', cache_key) if self.cache and cache_key else None
-            if cached_result:
-                self.logger.info(f"Cache hit for image prompt generation: {request.language}")
-                cached_result['generation_time'] = time.time() - start_time
-                # 重构Scene对象，确保video_prompt字段存在
-                scenes = []
-                for scene_data in cached_result['scenes']:
-                    if 'video_prompt' not in scene_data:
-                        scene_data['video_prompt'] = ''
-                    scenes.append(Scene(**scene_data))
-                cached_result['scenes'] = scenes
-                return ImagePromptResult(**cached_result)
+            # 缓存已禁用 - 每次都生成新内容
             
             # 验证请求
             if request.language not in self.supported_languages:
@@ -125,15 +104,7 @@ class ImagePromptGenerator:
                 model_used=self.llm_config.name
             )
             
-            # 缓存结果
-            cache_data = {
-                'scenes': [self._scene_to_dict(scene) for scene in updated_scenes],
-                'language': result.language,
-                'model_used': result.model_used
-            }
-            
-            if self.cache and cache_key:
-                self.cache.set('image_prompts', cache_key, cache_data)
+            # 缓存已禁用
             
             # 记录日志
             logger = self.config.get_logger('story_generator')
@@ -164,7 +135,8 @@ class ImagePromptGenerator:
         for scene in request.scenes:
             scenes_json.append({
                 "cap": scene.content,
-                "desc_prompt": ""  # 待填充，注意字段名修正
+                "image_prompt": "",  # 待填充，使用新的标准字段名
+                "video_prompt": ""   # 待填充
             })
         
         scenes_json_str = json.dumps(scenes_json, ensure_ascii=False, indent=2)
@@ -183,6 +155,30 @@ class ImagePromptGenerator:
         
         return prompt
     
+    def _split_prompt(self, full_prompt: str) -> tuple[str, str]:
+        """
+        分离系统提示词和用户提示词
+        
+        Args:
+            full_prompt: 完整提示词
+            
+        Returns:
+            tuple: (system_prompt, user_prompt)
+        """
+        # 查找JSON场景数据的开始位置
+        json_start = full_prompt.find('[')
+        if json_start == -1:
+            # 如果没有找到JSON，将整个内容作为用户提示词
+            return "你是专业的图像提示词生成专家。", full_prompt
+        
+        system_part = full_prompt[:json_start].strip()
+        user_part = full_prompt[json_start:].strip()
+        
+        if not system_part:
+            system_part = "你是专业的图像提示词生成专家。"
+            
+        return system_part, user_part
+
     async def _call_llm_api(self, prompt: str) -> str:
         """
         调用LLM API
@@ -194,12 +190,36 @@ class ImagePromptGenerator:
             str: LLM响应
         """
         try:
-            content = await self.llm_manager.call_llm_with_fallback(
-                prompt=prompt,
-                task_type='image_prompt_generation',
-                temperature=self.llm_config.temperature,
-                max_tokens=self.llm_config.max_tokens
-            )
+            # 尝试使用结构化输出
+            try:
+                # 分离系统提示词和用户提示词
+                system_prompt, user_prompt = self._split_prompt(prompt)
+                
+                structured_output = await self.llm_manager.generate_structured_output(
+                    task_type='image_prompt_generation',
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_retries=2
+                )
+                
+                if hasattr(structured_output, 'scenes') and structured_output.scenes:
+                    # 直接返回结构化内容，让后续处理逻辑处理
+                    content = self._convert_structured_to_json(structured_output.scenes)
+                    self.logger.info(f"✅ Structured image prompt generation successful: {len(structured_output.scenes)} scenes")
+                else:
+                    # 降级到原有方法
+                    content = str(structured_output)
+                    
+            except Exception as e:
+                self.logger.warning(f"🔄 Structured output failed, falling back to regular parsing: {e}")
+                
+                # 降级到原有方法
+                content = await self.llm_manager.call_llm_with_fallback(
+                    prompt=prompt,
+                    task_type='image_prompt_generation',
+                    temperature=self.llm_config.temperature,
+                    max_tokens=self.llm_config.max_tokens
+                )
             
             if not content:
                 raise ValueError("Empty response from all LLM providers")
@@ -209,6 +229,21 @@ class ImagePromptGenerator:
         except Exception as e:
             self.logger.error(f"LLM API call failed: {e}")
             raise
+    
+    def _convert_structured_to_json(self, scenes_data) -> str:
+        """将结构化输出转换为JSON字符串"""
+        import json
+        
+        scenes_list = []
+        for scene_data in scenes_data:
+            scene_dict = {
+                "cap": getattr(scene_data, 'content', ''),  # 兼容原有字段名
+                "image_prompt": getattr(scene_data, 'image_prompt', ''),  # 使用新的标准字段名
+                "video_prompt": getattr(scene_data, 'video_prompt', '')
+            }
+            scenes_list.append(scene_dict)
+        
+        return json.dumps(scenes_list, ensure_ascii=False, indent=2)
     
     def _parse_image_prompt_response(self, response: str, original_scenes: List[Scene]) -> List[Scene]:
         """
@@ -239,15 +274,24 @@ class ImagePromptGenerator:
                 if not isinstance(prompt_data, dict):
                     raise ValueError(f"Scene {i+1} data should be an object")
                 
-                # 获取生成的英文提示词 - 支持两种字段名
-                image_prompt = prompt_data.get('desc_prompt', prompt_data.get('desc_promopt', '')).strip()
+                # 获取生成的英文提示词 - 支持多种字段名(新旧兼容)
+                image_prompt = prompt_data.get('image_prompt', 
+                                             prompt_data.get('desc_prompt', 
+                                                           prompt_data.get('desc_promopt', ''))).strip()
                 
-                # 验证提示词质量
+                # 获取视频提示词
+                video_prompt = prompt_data.get('video_prompt', '').strip()
+                
+                # 验证图像提示词质量
                 if not image_prompt:
                     raise ValueError(f"Empty image prompt for scene {i+1}")
                 
                 if len(image_prompt) < 30:
                     raise ValueError(f"Image prompt too short for scene {i+1}: {image_prompt}")
+                
+                # 验证视频提示词（如果存在）
+                if video_prompt and len(video_prompt) < 10:
+                    self.logger.warning(f"Scene {i+1} video prompt might be too short: {video_prompt}")
                 
                 # 检查是否包含中文字符（应该是英文）
                 if any(ord(char) > 127 for char in image_prompt):
@@ -258,7 +302,7 @@ class ImagePromptGenerator:
                     sequence=original_scene.sequence,
                     content=original_scene.content,
                     image_prompt=image_prompt,
-                    video_prompt=getattr(original_scene, 'video_prompt', ''),  # 保持原有的video_prompt
+                    video_prompt=video_prompt if video_prompt else getattr(original_scene, 'video_prompt', ''),  # 使用新生成的video_prompt
                     duration_seconds=original_scene.duration_seconds,
                     animation_type=original_scene.animation_type,
                     subtitle_text=original_scene.subtitle_text
@@ -350,11 +394,9 @@ class ImagePromptGenerator:
     
     def get_generation_stats(self) -> Dict[str, Any]:
         """获取生成统计信息"""
-        cache_stats = self.cache.get_cache_stats() if self.cache else {}
-        
         return {
             'supported_languages': self.supported_languages,
-            'cache_stats': cache_stats.get('disk_cache', {}).get('image_prompts', {}),
+            # 缓存已删除
             'model_config': {
                 'name': self.llm_config.name,
                 'temperature': self.llm_config.temperature,

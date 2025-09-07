@@ -1,0 +1,23 @@
+{
+  "batch_info": {
+    "name": "5个并发视频测试",
+    "description": "测试RunningHub 5个视频生成任务并发处理",
+    "created": "2025-01-06",
+    "version": "1.0"
+  },
+  "settings": {
+    "language": "zh",
+    "concurrent": 1,
+    "notes": "故事级并发设为1，让每个故事内的5个场景并发生成视频"
+  },
+  "stories": [
+    {
+      "theme": "测试5个场景并发视频生成",
+      "language": "zh",
+      "priority": 1,
+      "description": "专门用来测试MediaPipeline能否并发生成5个场景的视频",
+      "expected_scenes": 5,
+      "notes": "这个故事将生成5个场景，每个场景都会并发生成视频"
+    }
+  ]
+}

@@ -14,10 +14,9 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
 from utils.logger import setup_logging
-from video.subtitle_processor import SubtitleProcessor, SubtitleRequest
+from video.subtitle_processor import SubtitleProcessor, SubtitleProcessorRequest
 
 
 def main():
@@ -28,7 +27,6 @@ def main():
     # 初始化系统组件
     print("📋 初始化系统组件...")
     config = ConfigManager()
-    cache = CacheManager()
     file_manager = FileManager()
     setup_logging()
     
@@ -171,7 +169,7 @@ def main():
     current_time = 0.0
     
     for scene in scenes:
-        subtitle_request = SubtitleRequest(
+        subtitle_request = SubtitleProcessorRequest(
             text=scene['subtitle_text'],
             scene_duration=scene['duration_seconds'],
             language=language,

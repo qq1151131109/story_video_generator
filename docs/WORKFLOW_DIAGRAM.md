@@ -460,7 +460,7 @@ graph TB
 ```mermaid
 graph TB
     %% 输入处理
-    A[📝 SubtitleRequest<br/>文本+时长+样式配置] --> B[📄 SubtitleProcessor]
+    A[📝 SubtitleProcessorRequest<br/>文本+时长+样式配置] --> B[📄 SubtitleProcessor]
     
     %% 文本预处理
     B --> C[🔍 文本分析<br/>字符统计+语言识别]

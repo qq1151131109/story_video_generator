@@ -49,6 +49,9 @@ class ConfigManager:
         self.config_dir = self.config_path.parent
         self.logger = logging.getLogger(__name__)
         
+        # 初始化配置字典
+        self.config = {}
+        
         # 加载主配置
         self._load_main_config()
         
@@ -249,33 +252,42 @@ class ConfigManager:
     
     def get_llm_config(self, task_type: str) -> ModelConfig:
         """
-        获取LLM配置
+        获取LLM配置 - 支持默认配置和任务特定配置
         
         Args:
             task_type: 任务类型 (script_generation, theme_extraction, etc.)
         """
-        config = self.get(f'llm.{task_type}', {})
+        # 获取任务特定配置（优先）
+        task_config = self.get(f'llm.{task_type}', {})
+        if not task_config:
+            raise ValueError(f"LLM config for task '{task_type}' not found")
         
-        if not config:
-            raise ValueError(f"LLM config not found for task type: {task_type}")
+        # 获取默认配置（可选，用于合并）
+        default_config = self.get('llm.default', {})
+        
+        # 合并配置：任务特定配置覆盖默认配置
+        if default_config:
+            merged_config = {**default_config, **task_config}
+        else:
+            merged_config = task_config
         
         # 处理环境变量替换
-        api_base_raw = config.get('api_base', '')
+        api_base_raw = merged_config.get('api_base', '')
         if '${' in api_base_raw:
             api_base = os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')
         else:
             api_base = api_base_raw
             
-        api_key_raw = config.get('api_key', '')
+        api_key_raw = merged_config.get('api_key', '')
         if '${' in api_key_raw:
             api_key = os.getenv('OPENROUTER_API_KEY', '')
         else:
             api_key = api_key_raw
         
         return ModelConfig(
-            name=config.get('model'),
-            temperature=config.get('temperature'),
-            max_tokens=config.get('max_tokens'),
+            name=merged_config.get('model'),
+            temperature=merged_config.get('temperature'),
+            max_tokens=merged_config.get('max_tokens'),
             api_base=api_base,
             api_key=api_key
         )

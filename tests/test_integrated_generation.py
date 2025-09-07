@@ -40,7 +40,7 @@ async def test_text_to_video_generator():
         print(f"✅ RunningHub API密钥已配置: {api_key[:20]}...")
         
         # 创建生成器
-        generator = TextToVideoGenerator(config, None, file_manager)
+        generator = TextToVideoGenerator(config, file_manager)
         print(f"✅ 生成器初始化成功: {generator}")
         
         # 创建测试请求
@@ -104,7 +104,7 @@ async def test_integrated_media_pipeline():
         file_manager = FileManager()
         
         # 创建媒体流水线
-        pipeline = MediaPipeline(config, None, file_manager)
+        pipeline = MediaPipeline(config, file_manager)
         print(f"✅ MediaPipeline初始化成功: {pipeline}")
         print(f"  一体化生成支持: {pipeline.enable_integrated_generation}")
         
@@ -189,7 +189,7 @@ async def test_batch_generation():
     try:
         config = ConfigManager()
         file_manager = FileManager()
-        generator = TextToVideoGenerator(config, None, file_manager)
+        generator = TextToVideoGenerator(config, file_manager)
         
         # 创建多个测试请求
         requests = [

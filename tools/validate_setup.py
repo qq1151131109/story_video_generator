@@ -10,7 +10,6 @@ from typing import Dict, List, Any
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
 from utils.i18n import get_i18n_manager
 from utils.logger import setup_logging
@@ -246,40 +245,11 @@ def check_multilanguage_support():
 
 
 def check_cache_system():
-    """检查缓存系统"""
+    """检查缓存系统（已禁用，缓存功能已移除）"""
     print("\n💾 缓存系统检查")
     print("-" * 40)
-    
-    try:
-        cache = CacheManager()
-        
-        # 测试缓存功能
-        test_key = "test_key"
-        test_data = {"test": "data", "timestamp": 12345}
-        
-        # 写入缓存
-        success = cache.set('scripts', test_key, test_data)
-        if not success:
-            print("❌ 缓存写入失败")
-            return False
-        
-        # 读取缓存
-        cached_data = cache.get('scripts', test_key)
-        if cached_data != test_data:
-            print("❌ 缓存读取失败")
-            return False
-        
-        print("✅ 缓存系统功能正常")
-        
-        # 显示缓存统计
-        stats = cache.get_cache_stats()
-        print(f"缓存统计: {stats}")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ 缓存系统检查失败: {e}")
-        return False
+    print("⚠️  缓存功能已移除，跳过缓存系统检查")
+    return True
 
 
 def check_logging_system():

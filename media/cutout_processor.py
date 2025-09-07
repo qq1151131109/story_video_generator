@@ -13,7 +13,6 @@ from pathlib import Path
 import logging
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
 
 @dataclass
@@ -43,10 +42,9 @@ class CutoutProcessor:
     4. 提供缓存机制避免重复处理
     """
     
-    def __init__(self, config_manager: ConfigManager, 
-                 cache_manager: CacheManager, file_manager: FileManager):
+    def __init__(self, config_manager: ConfigManager, file_manager: FileManager):
+        """初始化抠图处理器"""
         self.config = config_manager
-        self.cache = cache_manager
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.media')
         

@@ -9,7 +9,6 @@ import logging
 from dataclasses import dataclass
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
 from content.scene_splitter import Scene, SceneSplitResult
 from content.character_analyzer import Character, CharacterAnalysisResult
@@ -26,6 +25,7 @@ class MediaGenerationRequest:
     language: str                    # 语言代码
     script_title: str               # 文案标题
     full_script: str                # 完整文案
+    audio_segments: Optional[List[Dict[str, Any]]] = None  # 音频片段信息（新增）
 
 @dataclass
 class SceneMedia:
@@ -57,22 +57,21 @@ class MediaPipeline:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager, file_manager: FileManager):
+                 file_manager: FileManager):
         self.config = config_manager
-        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.media')
         
         # 初始化生成器
-        self.image_generator = ImageGenerator(config_manager, None, file_manager)
-        self.audio_generator = AudioGenerator(config_manager, None, file_manager)
+        self.image_generator = ImageGenerator(config_manager, file_manager)
+        self.audio_generator = AudioGenerator(config_manager, file_manager)
         
         # 检查是否启用一体化文生视频
         self.enable_integrated_generation = self._check_integrated_generation_support()
         
         if self.enable_integrated_generation:
             try:
-                self.text_to_video_generator = TextToVideoGenerator(config_manager, None, file_manager)
+                self.text_to_video_generator = TextToVideoGenerator(config_manager, file_manager)
                 self.logger.info("TextToVideoGenerator initialized successfully")
             except Exception as e:
                 raise RuntimeError(f"TextToVideoGenerator initialization failed: {e}. Please check RunningHub API configuration.")
@@ -128,7 +127,11 @@ class MediaPipeline:
             tasks = []
             
             # 任务1：生成场景媒体（一体化文生视频模式）
-            scene_task = self._generate_integrated_scene_media(request.scenes, request.language)
+            scene_task = self._generate_integrated_scene_media(
+                request.scenes, 
+                request.language, 
+                request.audio_segments  # 传递音频片段信息
+            )
             tasks.append(('scenes', scene_task))
             
             # 任务2：生成角色图像
@@ -216,8 +219,9 @@ class MediaPipeline:
             )
             image_requests.append((scene, image_req))
         
-        # 使用批量生成方法（带并发控制）
+        # 使用批量生成方法（带并发控制） 
         max_concurrent = self.config.get('general.max_concurrent_tasks', 5)
+        self.logger.info(f"🇮🇲 Using {max_concurrent} concurrent image generations")
         
         # 批量生成图像（返回与输入同序，失败为None）
         image_gen_requests = [req for _, req in image_requests]
@@ -250,22 +254,40 @@ class MediaPipeline:
         self.logger.info(f"Generated {len(scene_media)} complete scene media out of {len(scenes)} scenes")
         return scene_media
     
-    async def _generate_integrated_scene_media(self, scenes: List[Scene], language: str) -> List[SceneMedia]:
-        """使用一体化文生视频生成场景媒体"""
+    async def _generate_integrated_scene_media(self, scenes: List[Scene], language: str, 
+                                             audio_segments: Optional[List[Dict[str, Any]]] = None) -> List[SceneMedia]:
+        """使用一体化文生视频生成场景媒体
+        
+        Args:
+            scenes: 场景列表
+            language: 语言代码
+            audio_segments: 音频片段列表，格式为 [{'duration': float, 'scene_id': int, ...}]
+        """
         if not self.text_to_video_generator:
             raise RuntimeError("TextToVideoGenerator not available, cannot generate videos. Please check RunningHub API configuration.")
         
-        self.logger.info(f"Generating integrated text-to-videos for {len(scenes)} scenes...")
+        if not audio_segments:
+            raise RuntimeError("❌ 音频片段信息是必需的！按照原始Coze工作流，必须先生成音频片段来确定场景时长，然后生成对应时长的视频。")
+        
+        self.logger.info(f"Generating integrated text-to-videos for {len(scenes)} scenes with audio-based durations...")
+        
+        # 检查音频片段与场景数量是否匹配
+        if len(audio_segments) != len(scenes):
+            raise RuntimeError(f"音频片段数量({len(audio_segments)})与场景数量({len(scenes)})不匹配")
         
         # 准备文生视频请求
         video_requests = []
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        for idx, scene in enumerate(scenes, start=1):
+        for idx, (scene, audio_segment) in enumerate(zip(scenes, audio_segments), start=1):
             # 使用场景的图像提示词和视频提示词
             image_prompt = scene.image_prompt if scene.image_prompt else f"历史场景：{scene.content}"
             video_prompt = scene.video_prompt if scene.video_prompt else ""
+            
+            # 🎵 使用音频片段的实际时长
+            scene_duration = audio_segment['duration']
+            self.logger.info(f"Scene {idx} duration from audio: {scene_duration:.2f}s")
             
             # 一体化模式固定使用720x1280分辨率（工作流优化分辨率）
             video_req = TextToVideoRequest(
@@ -275,20 +297,24 @@ class MediaPipeline:
                 width=720,
                 height=1280,
                 fps=31,
-                duration=3.0,
+                duration=scene_duration,  # 🎵 使用音频实际时长
                 style="ancient_horror",
                 scene_id=f"scene_{idx}_{timestamp}"
             )
             video_requests.append((scene, video_req))
         
         # 使用批量生成方法（带并发控制）
-        max_concurrent = min(self.config.get('general.max_concurrent_tasks', 3), 3)  # 限制并发以避免API过载
+        # ✅ 统一并发控制：与图像生成使用相同的配置
+        max_concurrent = self.config.get('general.max_concurrent_tasks', 5)
+        # 最小保障：不低于1，不高于10（合理范围） 
+        max_concurrent = max(1, min(max_concurrent, 10))
+        self.logger.info(f"🚀 Using {max_concurrent} concurrent video generations (unified with image generation)")
         
         # 批量生成一体化视频
         video_gen_requests = [req for _, req in video_requests]
         
         try:
-            generated_videos = await self.text_to_video_generator.batch_generate_videos(
+            generated_videos = await self.text_to_video_generator.batch_generate_videos_v2(
                 video_gen_requests, max_concurrent
             )
         except Exception as e:
@@ -296,15 +322,10 @@ class MediaPipeline:
             error_msg = f"Integrated text-to-video generation completely failed: {e}"
             self.logger.error(error_msg)
             
-            # 检查是否允许网络错误时降级
-            allow_fallback = self.config.get('media.allow_fallback_on_network_error', False)
+            # 统一错误处理，不再使用fallback
             is_network_error = "Cannot connect to host" in str(e) or "Connection" in str(e)
             
-            if is_network_error and allow_fallback:
-                self.logger.warning(f"Network connection failed, falling back to traditional image generation mode")
-                self.logger.warning(f"This is a development/testing fallback. In production, please ensure RunningHub API connectivity.")
-                return await self._generate_scene_media(scenes, language)
-            elif is_network_error:
+            if is_network_error:
                 raise RuntimeError(f"RunningHub API connection failed. Please check:\n"
                                  f"1. Network connectivity to api.runninghub.cn\n"
                                  f"2. RunningHub API key validity\n"
@@ -313,25 +334,38 @@ class MediaPipeline:
             else:
                 raise RuntimeError(error_msg)
         
-        # 检查生成结果
+        # 检查生成结果 - 允许部分失败，但提供警告
         successful_videos = [v for v in generated_videos if v is not None]
-        if not successful_videos:
-            # 检查是否允许降级
-            allow_fallback = self.config.get('media.allow_fallback_on_network_error', False)
-            if allow_fallback:
-                self.logger.warning(f"All integrated video generations failed, falling back to traditional image generation mode")
-                self.logger.warning(f"This is a development/testing fallback. In production, please ensure RunningHub API connectivity.")
-                return await self._generate_scene_media(scenes, language)
-            else:
-                raise RuntimeError(f"All {len(scenes)} integrated video generations failed. "
-                                 f"Please check RunningHub API configuration and network connectivity.")
+        failed_count = len(scenes) - len(successful_videos)
         
-        # 组合结果
+        if not successful_videos:
+            raise RuntimeError(f"All {len(scenes)} integrated video generations failed. "
+                             f"Please check RunningHub API configuration and network connectivity.")
+        
+        if failed_count > 0:
+            success_rate = len(successful_videos) / len(scenes) * 100
+            self.logger.warning(f"⚠️ 媒体生成部分成功：{len(successful_videos)}/{len(scenes)} ({success_rate:.1f}%)")
+            self.logger.warning(f"💔 {failed_count}个场景的视频生成失败，最终视频将缺少这些场景")
+            
+            if success_rate < 60:
+                self.logger.error("🚨 成功率过低，建议检查：")
+                self.logger.error("   1. RunningHub API密钥和网络连接")
+                self.logger.error("   2. 降低并发数设置")
+                self.logger.error("   3. 简化故事内容描述")
+        
+        # 组合结果 - 根据原始索引正确映射成功的场景
         scene_media = []
+        success_indices = {getattr(video, 'original_scene_index', i): video for i, video in enumerate(successful_videos)}
         
         for i, scene in enumerate(scenes):
             try:
-                video_result = generated_videos[i] if i < len(generated_videos) else None
+                # 检查这个场景索引是否有对应的成功视频
+                if i in success_indices:
+                    video_result = success_indices[i]
+                else:
+                    # 这个场景的视频生成失败，跳过
+                    self.logger.warning(f"⏭️ 跳过场景{i+1}：'{scene.content[:30]}...' (视频生成失败)")
+                    continue
                 
                 if video_result:
                     # 使用一体化视频结果创建SceneMedia
@@ -364,47 +398,54 @@ class MediaPipeline:
     
     async def _generate_character_images(self, characters: List[Character], 
                                        language: str) -> Dict[str, GeneratedImage]:
-        """生成角色图像 - 使用受控并发"""
-        self.logger.info(f"Generating images for {len(characters)} characters...")
+        """生成角色图像 - 仅生成主角色图像（匹配原始Coze工作流设计）"""
+        if not characters:
+            return {}
         
-        character_images = {}
-        
-        # 准备角色图像请求
-        image_requests = []
-        character_names = []
-        
+        # 选择主角色：优先选择标记为主角的，否则选择第一个角色
+        main_character = None
         for character in characters:
-            if character.image_prompt:  # 只为有提示词的角色生成图像
-                # 从配置读取分辨率
-                media_config = self.config.get_media_config()
-                width, height = map(int, media_config.image_resolution.split('x'))
-                
-                request = ImageGenerationRequest(
-                    prompt=character.image_prompt,
-                    style="ancient_horror",
-                    width=width,
-                    height=height
-                )
-                image_requests.append(request)
-                character_names.append(character.name)
+            if hasattr(character, 'is_main') and character.is_main:
+                main_character = character
+                break
         
-        if not image_requests:
-            return character_images
+        if not main_character:
+            main_character = characters[0]  # 默认第一个角色为主角
         
-        # 使用批量生成方法（单个并发，避免角色图像竞争）
-        generated_images = await self.image_generator.batch_generate_images(
-            image_requests, max_concurrent=1
+        self.logger.info(f"Generating image for main character: {main_character.name}")
+        
+        if not main_character.image_prompt:
+            self.logger.warning(f"Main character {main_character.name} has no image prompt")
+            return {}
+        
+        # 准备主角色图像请求
+        media_config = self.config.get_media_config()
+        width, height = map(int, media_config.image_resolution.split('x'))
+        
+        request = ImageGenerationRequest(
+            prompt=main_character.image_prompt,
+            style="ancient_horror",
+            width=width,
+            height=height
         )
         
-        # 组合结果
-        for i, char_name in enumerate(character_names):
-            if i < len(generated_images):
-                character_images[char_name] = generated_images[i]
-                self.logger.info(f"Character image generated for {char_name}")
+        # 生成主角色图像
+        try:
+            generated_images = await self.image_generator.batch_generate_images(
+                [request], max_concurrent=1
+            )
+            
+            if generated_images and generated_images[0]:
+                character_images = {main_character.name: generated_images[0]}
+                self.logger.info(f"Main character image generated: {main_character.name}")
+                return character_images
             else:
-                self.logger.error(f"Character image generation failed for {char_name}")
-        
-        return character_images
+                self.logger.error(f"Main character image generation failed: {main_character.name}")
+                return {}
+                
+        except Exception as e:
+            self.logger.error(f"Main character image generation error: {e}")
+            return {}
     
     
     async def _generate_title_audio(self, title: str, language: str) -> GeneratedAudio:

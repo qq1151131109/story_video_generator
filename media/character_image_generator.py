@@ -12,7 +12,6 @@ from pathlib import Path
 import logging
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
 from .image_generator import ImageGenerator, ImageGenerationRequest, GeneratedImage
 from .cutout_processor import CutoutProcessor, CutoutRequest, CutoutResult
@@ -45,16 +44,15 @@ class CharacterImageGenerator:
     4. 返回可复用的主角图像资源
     """
     
-    def __init__(self, config_manager: ConfigManager, 
-                 cache_manager: CacheManager, file_manager: FileManager):
+    def __init__(self, config_manager: ConfigManager, file_manager: FileManager):
+        """初始化主角图像生成器"""
         self.config = config_manager
-        self.cache = cache_manager
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.media')
         
         # 初始化依赖组件
-        self.image_generator = ImageGenerator(config_manager, cache_manager, file_manager)
-        self.cutout_processor = CutoutProcessor(config_manager, cache_manager, file_manager)
+        self.image_generator = ImageGenerator(config_manager, file_manager)
+        self.cutout_processor = CutoutProcessor(config_manager, file_manager)
         
         # 支持的语言
         self.supported_languages = config_manager.get_supported_languages()

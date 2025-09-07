@@ -31,7 +31,7 @@ def test_text_to_video_generator_initialization():
         config.get_api_key = lambda key: None
         
         try:
-            generator = TextToVideoGenerator(config, None, file_manager)
+            generator = TextToVideoGenerator(config, file_manager)
             print("❌ 应该抛出API密钥错误")
             return False
         except ValueError as e:
@@ -47,7 +47,7 @@ def test_text_to_video_generator_initialization():
         # 模拟API密钥存在
         config.get_api_key = lambda key: "test_api_key" if key == 'runninghub' else None
         
-        generator = TextToVideoGenerator(config, None, file_manager)
+        generator = TextToVideoGenerator(config, file_manager)
         print(f"✅ 生成器初始化成功: {generator}")
         print(f"  工作流ID: {generator.workflow_id}")
         print(f"  API超时: {generator.api_timeout}秒")
@@ -73,7 +73,7 @@ def test_workflow_payload_building():
         # 模拟API密钥
         config.get_api_key = lambda key: "test_api_key" if key == 'runninghub' else None
         
-        generator = TextToVideoGenerator(config, None, file_manager)
+        generator = TextToVideoGenerator(config, file_manager)
         
         # 创建测试请求
         request = TextToVideoRequest(
@@ -134,7 +134,7 @@ def test_media_pipeline_integration():
         config.get_api_key = lambda key: "test_api_key" if key == 'runninghub' else None
         
         # 创建MediaPipeline
-        pipeline = MediaPipeline(config, None, file_manager)
+        pipeline = MediaPipeline(config, file_manager)
         
         print(f"✅ MediaPipeline初始化成功")
         print(f"  一体化生成支持: {pipeline.enable_integrated_generation}")

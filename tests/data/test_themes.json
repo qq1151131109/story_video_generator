@@ -1,0 +1,206 @@
+{
+  "test_themes": {
+    "chinese_history": {
+      "valid_themes": [
+        "康熙大帝智擒鳌拜的惊心传奇",
+        "秦始皇统一六国的历史壮举",
+        "唐玄宗开元盛世的辉煌",
+        "武则天称帝的传奇故事",
+        "朱元璋建立明朝的艰难历程",
+        "成吉思汗征服欧亚的雄图",
+        "刘邦项羽的楚汉争霸",
+        "诸葛亮出师表的忠诚智慧"
+      ],
+      "expected_keywords": ["皇帝", "历史", "中国", "古代", "传奇", "王朝"],
+      "language": "zh"
+    },
+    "world_history": {
+      "valid_themes": [
+        "Napoleon's Waterloo: The Final Battle",
+        "The Fall of the Roman Empire",
+        "Alexander the Great's Conquest",
+        "Caesar's Crossing of the Rubicon",
+        "Hannibal's March Over the Alps", 
+        "The Battle of Hastings 1066",
+        "Cleopatra's Political Alliances",
+        "Spartacus and the Slave Rebellion"
+      ],
+      "expected_keywords": ["emperor", "battle", "conquest", "empire", "history"],
+      "language": "en"
+    },
+    "spanish_legends": {
+      "valid_themes": [
+        "El Cid Campeador y la Reconquista",
+        "La conquista de América por Cortés",
+        "Isabel la Católica y la unificación",
+        "Don Quijote y los molinos de viento",
+        "La leyenda de Santiago Matamoros",
+        "Los Reyes Católicos y Granada",
+        "Vasco Núñez de Balboa y el Pacífico",
+        "El Siglo de Oro español"
+      ],
+      "expected_keywords": ["rey", "conquista", "leyenda", "España", "historia"],
+      "language": "es"
+    },
+    "edge_cases": {
+      "challenging_themes": [
+        "",
+        "a",
+        "特殊字符@#$%^&*()",
+        "🎬📝🎭🎪🎨🎯🎪",
+        "这是一个非常非常非常长的主题名称，包含了很多很多的字符，用来测试系统对超长主题的处理能力，看看是否会出现截断或其他问题" + "很长很长" * 50,
+        "MixedLanguage混合语言テスト",
+        "123456789",
+        "!@#$%^&*()_+-=[]{}|;':\",./<>?",
+        "   空格主题   ",
+        "\n\t换行制表符\r\n"
+      ],
+      "expected_behavior": "handle_gracefully_or_error",
+      "language": "zh"
+    }
+  },
+  "test_scenarios": {
+    "performance_testing": {
+      "themes": [
+        "康熙大帝",
+        "Napoleon", 
+        "El Cid",
+        "亚历山大大帝",
+        "Julius Caesar"
+      ],
+      "concurrent_count": 5,
+      "max_duration_seconds": 300,
+      "expected_success_rate": 0.8
+    },
+    "stress_testing": {
+      "themes": ["压力测试主题"] * 20,
+      "concurrent_count": 10,
+      "max_memory_mb": 500,
+      "max_duration_seconds": 600
+    },
+    "multilingual_testing": {
+      "theme_sets": [
+        {
+          "theme": "康熙大帝智擒鳌拜",
+          "language": "zh",
+          "expected_content_length": 500
+        },
+        {
+          "theme": "Napoleon's Waterloo Battle",
+          "language": "en", 
+          "expected_content_length": 500
+        },
+        {
+          "theme": "El Cid Campeador",
+          "language": "es",
+          "expected_content_length": 500
+        }
+      ]
+    }
+  },
+  "validation_rules": {
+    "content_quality": {
+      "min_length": 100,
+      "max_length": 2000,
+      "required_elements": ["title", "content"],
+      "forbidden_patterns": ["ERROR", "NULL", "undefined"]
+    },
+    "media_quality": {
+      "image_min_size_bytes": 1000,
+      "audio_min_duration": 5.0,
+      "video_min_duration": 10.0,
+      "required_formats": ["jpg", "mp3", "mp4"]
+    },
+    "performance_benchmarks": {
+      "content_generation_max_seconds": 30,
+      "media_generation_max_seconds": 120,
+      "video_composition_max_seconds": 60,
+      "total_workflow_max_seconds": 300,
+      "max_memory_usage_mb": 200,
+      "max_concurrent_tasks": 5
+    }
+  },
+  "mock_responses": {
+    "openai_responses": {
+      "script_generation": {
+        "zh": "你知道吗？康熙皇帝年仅十六岁时，就展现了超凡的政治智慧。面对权倾朝野的鳌拜，这位年轻的君主如何运用智谋，最终智擒这位权臣？让我们一起探索这段惊心动魄的历史传奇...",
+        "en": "Do you know how Emperor Kangxi, at just sixteen years old, demonstrated extraordinary political wisdom? Facing the powerful minister Oboi who controlled the court, how did this young ruler use his wit to ultimately outsmart this influential official? Let us explore this thrilling historical legend...",
+        "es": "¿Sabías que el Emperador Kangxi, con solo dieciséis años, demostró una sabiduría política extraordinaria? Enfrentando al poderoso ministro Oboi que controlaba la corte, ¿cómo utilizó este joven gobernante su ingenio para finalmente superar a este influyente oficial? Exploremos esta emocionante leyenda histórica..."
+      },
+      "scene_splitting": {
+        "scene_count": 8,
+        "scene_duration": 3.0
+      },
+      "character_analysis": {
+        "character_count": 1,
+        "main_character": "康熙皇帝"
+      }
+    },
+    "runninghub_responses": {
+      "image_generation": {
+        "success": true,
+        "task_id": "test-img-{sequence}",
+        "result_url": "https://example.com/test-image-{sequence}.jpg",
+        "processing_time": 10.0
+      },
+      "video_generation": {
+        "success": true,
+        "task_id": "test-vid-{sequence}",
+        "result_url": "https://example.com/test-video-{sequence}.mp4",
+        "processing_time": 30.0
+      }
+    },
+    "minimax_responses": {
+      "audio_generation": {
+        "success": true,
+        "audio_url": "https://example.com/test-audio.mp3",
+        "duration": 10.5,
+        "subtitles": [
+          {"start": 0.0, "end": 5.0, "text": "你知道吗？"},
+          {"start": 5.0, "end": 10.0, "text": "康熙是如何智擒鳌拜的？"}
+        ]
+      }
+    }
+  },
+  "error_simulation": {
+    "api_failures": {
+      "network_timeout": {
+        "error_type": "TimeoutError",
+        "message": "Request timeout after 30 seconds",
+        "recovery_strategy": "retry_with_exponential_backoff"
+      },
+      "rate_limiting": {
+        "error_type": "RateLimitError", 
+        "message": "API rate limit exceeded",
+        "recovery_strategy": "wait_and_retry"
+      },
+      "invalid_api_key": {
+        "error_type": "AuthenticationError",
+        "message": "Invalid API key provided",
+        "recovery_strategy": "fail_immediately"
+      },
+      "service_unavailable": {
+        "error_type": "ServiceUnavailableError",
+        "message": "Service temporarily unavailable",
+        "recovery_strategy": "retry_with_backoff"
+      }
+    },
+    "system_failures": {
+      "disk_full": {
+        "error_type": "OSError",
+        "message": "No space left on device",
+        "recovery_strategy": "cleanup_temp_files"
+      },
+      "memory_exhausted": {
+        "error_type": "MemoryError", 
+        "message": "Cannot allocate memory",
+        "recovery_strategy": "reduce_batch_size"
+      },
+      "permission_denied": {
+        "error_type": "PermissionError",
+        "message": "Permission denied to write file",
+        "recovery_strategy": "check_permissions"
+      }
+    }
+  }
+}

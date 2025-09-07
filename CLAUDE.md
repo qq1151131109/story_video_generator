@@ -6,7 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 🎯 项目概述
 
-这是一个基于原Coze工作流的完整Python实现的故事视频生成器，支持多语言(中英西)故事视频的批量生产。项目已完成v2.0重大优化，采用服务化架构，具备完整的企业级功能和质量保证机制。
+这是一个基于原Coze工作流的完整Python实现的故事视频生成器，支持多语言(中英西)故事视频的批量生产。项目采用服务化架构，具备完整的企业级功能和质量保证机制。
+
+**核心特色**：
+- 🎬 **一体化文生视频系统**：TextToVideoGenerator单API调用替代传统两步流程
+- 🚀 **5个视频并发处理**：支持场景级视频生成的真正并发
+- 🎵 **音频驱动时长分配**：按音频实际时长生成对应长度视频，解决黑屏问题
+- ⚡ **优化架构**：两阶段并发（批量提交→并发轮询），大幅提升性能
 
 ## 🏗️ 系统架构
 
@@ -101,12 +107,13 @@ HTTPX_TIMEOUT=300
 ```
 
 ### 主要配置 (config/settings.json)
-- `general.max_concurrent_tasks`: 最大并发任务数（默认5）
-- `llm.script_generation`: GPT-5模型配置 (通过OpenRouter)
+- `general.max_concurrent_tasks`: 最大并发任务数（**默认5，支持5个视频并发**）
+- `llm.script_generation`: Gemini 2.5 Flash模型配置 (通过OpenRouter)
 - `media.image.primary_provider`: 主要图像生成商（runninghub）
 - `media.audio.primary_provider`: 主要音频合成商（minimax）
-- `media.enable_integrated_generation`: 🆕 启用一体化文生视频（默认true）
-- `media.integrated_workflow_id`: 🆕 一体化工作流ID（1964196221642489858）
+- `media.enable_integrated_generation`: 启用一体化文生视频（**默认true，推荐使用**）
+- `media.integrated_workflow_id`: 一体化工作流ID（**1964196221642489858**）
+- `video.animation_strategy`: 动画策略（**"integrated_text_to_video"推荐**）
 
 ## 🚀 常用开发命令
 
@@ -147,6 +154,12 @@ python tests/test_integrated_generation.py
 
 # 🆕 一体化功能逻辑测试（v3.0）
 python tests/test_integration_logic.py
+
+# 🚀 并发配置诊断工具
+python tools/check_concurrency.py
+
+# 🎯 测试5个并发视频生成
+python tools/test_5_concurrent.py
 
 # 视频验证测试
 python tests/verify_final_video.py
@@ -213,6 +226,8 @@ pip install --upgrade openai aiohttp httpx
 - **API调用错误**: 重试机制，最终失败时抛出明确错误
 - **媒体处理错误**: 详细错误信息，便于调试
 - **并发错误**: UUID隔离，避免资源冲突
+- **音频时长问题**: 无音频时直接报错，不允许默认时长
+- **视频黑屏问题**: 通过音频驱动时长分配确保匹配
 
 #### 关键错误处理代码位置
 - `core/config_manager.py`: 配置验证和错误处理
@@ -246,10 +261,12 @@ python tools/validate_setup.py --verbose
 ```
 
 ### 5. 性能优化指导
-- **并发控制**: 根据系统资源调整`max_concurrent_tasks`
+- **并发控制**: 根据系统资源调整`max_concurrent_tasks`（推荐5个）
 - **缓存策略**: 合理设置TTL和缓存大小
 - **内存管理**: 定期运行`optimize.py`监控内存使用
 - **API调用**: 利用多提供商容错减少调用失败
+- **音频优先**: 先生成场景音频获取时长，再生成对应时长视频
+- **连接优化**: 使用优化的aiohttp连接池支持真正并发
 
 ## 📊 原工作流对应关系
 
@@ -265,6 +282,24 @@ python tools/validate_setup.py --verbose
 
 ## 🐛 常见问题处理
 
+### 🚨 关键问题：视频黑屏
+```bash
+# 症状：生成的视频是黑屏
+# 根本原因：音频时长与视频时长不匹配
+# 解决方案：系统已修复为音频驱动时长分配
+# 验证：python tools/check_concurrency.py
+```
+
+### 🚀 并发问题：只有1个视频在跑
+```bash
+# 症状：RunningHub控制台只显示1个任务运行
+# 原因分析：
+# 1. MediaPipeline硬编码限制（已修复）
+# 2. JSON批量模式串行限制（已修复）
+# 3. 任务提交与轮询架构问题（已优化）
+# 验证：python tools/test_5_concurrent.py
+```
+
 ### API密钥问题
 ```bash
 # 症状：Missing OPENROUTER_API_KEY
@@ -279,18 +314,14 @@ cat .env | grep OPENROUTER_API_KEY
 python -c "from core.config_manager import ConfigManager; print(ConfigManager().get_llm_config('script_generation'))"
 ```
 
-### 缓存问题
+### RunningHub API问题
 ```bash
-# 症状：缓存相关错误
-# 解决：清理并重建缓存目录
-rm -rf output/cache && mkdir -p output/cache/{scripts,scenes,images,audio}
-```
-
-### 图生视频问题
-```bash
-# 症状：RunningHub I2V task timeout
-# 解决：检查API密钥和网络连接
-python -c "from media.image_to_video_generator import ImageToVideoGenerator; print('I2V OK')"
+# 症状：RunningHub task timeout 或 APIKEY_USER_NOT_FOUND
+# 解决：
+# 1. 检查RunningHub API密钥有效性
+# 2. 确认网络连接到api.runninghub.cn
+# 3. 验证工作流ID是否正确（1964196221642489858）
+python -c "from media.text_to_video_generator import TextToVideoGenerator; print('API配置检查完成')"
 ```
 
 ### 视频拼接问题
@@ -298,13 +329,6 @@ python -c "from media.image_to_video_generator import ImageToVideoGenerator; pri
 # 症状：Non-monotonous DTS in output stream
 # 解决：系统已自动统一编码参数，检查FFmpeg版本
 ffmpeg -version
-```
-
-### 权限问题
-```bash
-# 症状：Cannot create output directory
-# 解决：检查输出目录权限
-chmod 755 output/
 ```
 
 ## 🌟 最佳实践
@@ -330,23 +354,31 @@ chmod 755 output/
 - 集成测试验证端到端流程
 - 性能测试确保系统可扩展性
 
-## 🎯 服务化开发指南 (v2.0)
+## 🎯 服务化开发指南
 
 ### 使用StoryVideoService
 ```python
 from services.story_video_service import StoryVideoService
 
-# 基础用法
+# 基础用法 - 推荐使用
 service = StoryVideoService()
-result = await service.generate_story_video(
-    theme="唐太宗贞观之治",
-    language="zh"
-)
 
-# 分步控制
-content_result = await service.generate_content(theme, language)
-media_result = await service.generate_media(scenes, characters, language)
-video_path = await service.compose_video(scenes, audio_files, image_files, language)
+# ⭐ 新架构：音频驱动时长分配
+# 第一步：生成场景音频片段（获取实际时长）
+audio_segments_result = await service.generate_scene_audio_segments(scenes, language)
+audio_segments = audio_segments_result['audio_segments']
+
+# 第二步：使用音频时长生成媒体（避免黑屏）
+media_request = MediaGenerationRequest(
+    scenes=scenes,
+    characters=characters,
+    main_character=main_character,
+    language=language,
+    script_title=title,
+    full_script=content,
+    audio_segments=audio_segments  # 🎵 关键：传递音频时长信息
+)
+media_result = await service.media_pipeline.generate_media_async(media_request)
 ```
 
 ### 质量保证机制
@@ -354,6 +386,8 @@ video_path = await service.compose_video(scenes, audio_files, image_files, langu
 - **WhisperX优先**: 使用精确字幕对齐，不降级
 - **错误暴露**: 问题会及时暴露，便于快速修复
 - **严格验证**: 所有输入输出都经过严格验证
+- **音频驱动**: 必须先生成音频才能生成视频，确保时长匹配
+- **并发优化**: 支持5个场景视频真正并发生成
 
 ### 双动画系统使用
 ```python
@@ -540,7 +574,7 @@ v3.0引入了**一体化文生视频生成器**，提供三种不同的视频生
 from media.text_to_video_generator import TextToVideoGenerator, TextToVideoRequest
 
 # 初始化生成器
-generator = TextToVideoGenerator(config, None, file_manager)
+generator = TextToVideoGenerator(config, file_manager)
 
 # 创建请求
 request = TextToVideoRequest(
@@ -557,7 +591,7 @@ print(f"视频路径: {result.video_path}")
 **3. MediaPipeline集成**
 ```python
 # MediaPipeline自动检测一体化模式
-pipeline = MediaPipeline(config, None, file_manager)
+pipeline = MediaPipeline(config, file_manager)
 print(f"一体化生成: {pipeline.enable_integrated_generation}")
 
 # 自动选择最优生成模式

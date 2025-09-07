@@ -1,0 +1,38 @@
+{
+  "general": {
+    "output_dir": "output",
+    "log_level": "DEBUG"
+  },
+  "logging": {
+    "level": "DEBUG",
+    "console_level": "INFO",
+    "file_level": "DEBUG",
+    "max_file_size_mb": 10,
+    "backup_count": 5,
+    "log_format": "detailed",
+    "enable_error_aggregation": true,
+    "enable_performance_tracking": true,
+    "files": {
+      "main": {
+        "filename": "story_generator.log",
+        "level": "DEBUG",
+        "enabled": true
+      },
+      "errors": {
+        "filename": "errors.log",
+        "level": "ERROR",
+        "enabled": true
+      },
+      "performance": {
+        "filename": "performance.log",
+        "level": "INFO",
+        "enabled": true
+      },
+      "detailed": {
+        "filename": "detailed.log",
+        "level": "DEBUG",
+        "enabled": true
+      }
+    }
+  }
+}

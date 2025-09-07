@@ -16,14 +16,13 @@ from tools.load_env import load_env_file
 load_env_file()
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
 from utils.logger import setup_logging
 from content.script_generator import ScriptGenerator, ScriptGenerationRequest
 from content.scene_splitter import SceneSplitter, SceneSplitRequest
 from media.image_generator import ImageGenerator, ImageGenerationRequest
 from media.audio_generator import AudioGenerator, AudioGenerationRequest
-from video.subtitle_processor import SubtitleProcessor, SubtitleRequest, SubtitleSegment
+from video.subtitle_processor import SubtitleProcessor, SubtitleProcessorRequest, SubtitleSegment
 from video.video_composer import VideoComposer
 
 async def main():
@@ -33,11 +32,10 @@ async def main():
     
     # 初始化组件
     config = ConfigManager()
-    cache = CacheManager()
     file_manager = FileManager()
     setup_logging()
     
-    audio_generator = AudioGenerator(config, cache, file_manager)
+    audio_generator = AudioGenerator(config, file_manager)
     subtitle_processor = SubtitleProcessor(config, file_manager)
     video_composer = VideoComposer(config, file_manager)
     
@@ -70,7 +68,7 @@ async def main():
                 ))
         else:
             print("⚠️  使用时长分割字幕")
-            subtitle_request = SubtitleRequest(
+            subtitle_request = SubtitleProcessorRequest(
                 text=test_text,
                 scene_duration=audio_result.duration_seconds,
                 language="zh",

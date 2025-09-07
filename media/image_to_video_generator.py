@@ -19,7 +19,7 @@ from utils.file_manager import FileManager
 class ImageToVideoRequest:
     """图生视频请求"""
     image_path: str                    # 输入图片路径  
-    desc_prompt: str                   # 图像描述提示词（来自ImagePromptGenerator）
+    image_prompt: str                  # 图像提示词（来自ImagePromptGenerator）
     duration_seconds: float            # 视频时长
     width: int = 720                   # 视频宽度
     height: int = 1280                 # 视频高度
@@ -228,7 +228,7 @@ class ImageToVideoGenerator:
             {
                 "nodeId": self.node_ids['positive_prompt'],
                 "fieldName": "text",
-                "fieldValue": request.desc_prompt
+                "fieldValue": request.image_prompt
             },
             # 负向提示词节点  
             {
@@ -372,7 +372,7 @@ class ImageToVideoGenerator:
         try:
             # 生成文件名
             filename = self.file_manager.generate_filename(
-                content=request.desc_prompt,
+                content=request.image_prompt,
                 prefix="i2v",
                 extension="mp4"
             )

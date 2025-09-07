@@ -17,7 +17,6 @@ __author__ = "历史故事生成系统"
 
 # 导入主要组件
 from .core.config_manager import ConfigManager
-from .core.cache_manager import CacheManager
 from .utils.file_manager import FileManager
 from .utils.logger import setup_logging
 
@@ -33,13 +32,12 @@ from .media.image_generator import ImageGenerator, ImageGenerationRequest
 from .media.audio_generator import AudioGenerator, AudioGenerationRequest
 
 # 导入视频处理组件
-from .video.subtitle_processor import SubtitleProcessor, SubtitleRequest
-from .video.animation_processor import AnimationProcessor, AnimationRequest
+from .video.subtitle_processor import SubtitleProcessor, SubtitleProcessorRequest
+from .video.enhanced_animation_processor import EnhancedAnimationProcessor
 
 __all__ = [
     # 核心组件
     'ConfigManager',
-    'CacheManager', 
     'FileManager',
     'setup_logging',
     
@@ -63,7 +61,6 @@ __all__ = [
     
     # 视频处理
     'SubtitleProcessor',
-    'SubtitleRequest',
-    'AnimationProcessor',
-    'AnimationRequest'
+    'SubtitleProcessorRequest',
+    'EnhancedAnimationProcessor'
 ]

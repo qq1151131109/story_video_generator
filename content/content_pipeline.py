@@ -9,7 +9,6 @@ import logging
 from dataclasses import dataclass
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
 from .script_generator import ScriptGenerator, ScriptGenerationRequest, GeneratedScript
 from .scene_splitter import SceneSplitter, SceneSplitRequest, SceneSplitResult
@@ -46,16 +45,15 @@ class ContentPipeline:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager, file_manager: FileManager):
+                 file_manager: FileManager):
         self.config = config_manager
-        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
         # 初始化各个组件
-        self.script_generator = ScriptGenerator(config_manager, None, file_manager)
-        self.scene_splitter = SceneSplitter(config_manager, None, file_manager)
-        self.character_analyzer = CharacterAnalyzer(config_manager, None, file_manager)
+        self.script_generator = ScriptGenerator(config_manager, file_manager)
+        self.scene_splitter = SceneSplitter(config_manager, file_manager)
+        self.character_analyzer = CharacterAnalyzer(config_manager, file_manager)
         
         # 支持的语言
         self.supported_languages = config_manager.get_supported_languages()

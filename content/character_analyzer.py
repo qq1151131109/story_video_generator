@@ -11,9 +11,8 @@ import logging
 from dataclasses import dataclass
 
 from core.config_manager import ConfigManager, ModelConfig
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
-from utils.llm_client_manager import LLMClientManager
+from utils.enhanced_llm_manager import EnhancedLLMManager
 
 @dataclass
 class Character:
@@ -55,9 +54,8 @@ class CharacterAnalyzer:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager, file_manager: FileManager):
+                 file_manager: FileManager):
         self.config = config_manager
-        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
@@ -68,7 +66,8 @@ class CharacterAnalyzer:
         self.llm_config = self.config.get_llm_config('character_analysis')
         
         # 初始化多提供商LLM客户端管理器
-        self.llm_manager = LLMClientManager(config_manager)
+        self.llm_manager = EnhancedLLMManager(config_manager)
+        self.logger.info("✅ 使用增强LLM管理器 (统一架构)")
         
         # 加载提示词模板
         self._load_prompt_templates()
@@ -381,23 +380,44 @@ Ahora por favor analiza los personajes en la siguiente historia histórica:
             if 'main_character' in data and data['main_character']:
                 main_char_data = data['main_character']
                 
-                # 查找主角是否在角色列表中
-                for char in characters:
-                    if char.name == main_char_data.get('name'):
-                        main_character = char
-                        break
-                
-                # 如果没找到，创建主角对象
-                if not main_character and main_char_data.get('name'):
-                    main_character = Character(
-                        name=main_char_data.get('name', '主角'),
-                        description=main_char_data.get('description', ''),
-                        role='主角',
-                        appearance='',
-                        personality='',
-                        historical_significance='',
-                        image_prompt=''
-                    )
+                # 处理main_character可能是字符串或字典的情况
+                if isinstance(main_char_data, str):
+                    # 如果是字符串，直接使用作为名字查找角色
+                    for char in characters:
+                        if char.name == main_char_data:
+                            main_character = char
+                            break
+                    
+                    # 如果没找到，创建简单主角对象
+                    if not main_character:
+                        main_character = Character(
+                            name=main_char_data,
+                            description='主角',
+                            role='主角',
+                            appearance='',
+                            personality='',
+                            historical_significance='',
+                            image_prompt=''
+                        )
+                elif isinstance(main_char_data, dict):
+                    # 如果是字典，按原来的逻辑处理
+                    # 查找主角是否在角色列表中
+                    for char in characters:
+                        if char.name == main_char_data.get('name'):
+                            main_character = char
+                            break
+                    
+                    # 如果没找到，创建主角对象
+                    if not main_character and main_char_data.get('name'):
+                        main_character = Character(
+                            name=main_char_data.get('name', '主角'),
+                            description=main_char_data.get('description', ''),
+                            role='主角',
+                            appearance='',
+                            personality='',
+                            historical_significance='',
+                            image_prompt=''
+                        )
             
             # 如果没有明确的主角，选择第一个角色作为主角
             if not main_character and characters:

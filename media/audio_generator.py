@@ -17,7 +17,6 @@ import hashlib
 from io import BytesIO
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
 
 # ElevenLabs imports (需要先安装: pip install elevenlabs)
@@ -72,9 +71,8 @@ class AudioGenerator:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager, file_manager: FileManager):
+                 file_manager: FileManager):
         self.config = config_manager
-        # 缓存已删除
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.media')
         
@@ -103,7 +101,7 @@ class AudioGenerator:
                 'es': self.primary_provider,
             }
         
-        self.fallback_providers = self.audio_config.get('fallback_providers', ['elevenlabs'])
+        # fallback机制已移除，只使用主要提供商
         
         # 语音配置
         self._load_voice_configs()
@@ -219,11 +217,8 @@ class AudioGenerator:
                 if isinstance(preferred_provider, dict):
                     preferred_provider = preferred_provider.get(request.language, 'elevenlabs')
                 
-                # 安全构建提供商列表，确保所有元素都是字符串
+                # 只使用首选提供商，不再使用fallback
                 providers_to_try = [preferred_provider]
-                for p in self.fallback_providers:
-                    if isinstance(p, str) and p != preferred_provider:
-                        providers_to_try.append(p)
             
             last_error = None
             for provider_name in providers_to_try:
@@ -349,118 +344,172 @@ class AudioGenerator:
         
         self.logger.info(f"Using MiniMax sync TTS with GroupId: {group_id}")
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(api_url, json=payload, headers=headers, timeout=60) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"MiniMax sync API error {response.status}: {error_text}")
+        # 重试机制配置
+        max_retries = self.config.get('general.api_max_retries', 3)
+        retry_delay = self.config.get('general.retry_delay', 2)
+        timeout_seconds = self.config.get('general.api_timeout', 180)  # 增加到3分钟
+        
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    self.logger.info(f"🔄 MiniMax retry attempt {attempt + 1}/{max_retries} after {retry_delay}s...")
+                    await asyncio.sleep(retry_delay)
                 
-                result = await response.json()
+                timeout_config = aiohttp.ClientTimeout(total=timeout_seconds)
+                async with aiohttp.ClientSession(timeout=timeout_config) as session:
+                    async with session.post(api_url, json=payload, headers=headers) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            raise Exception(f"MiniMax sync API error {response.status}: {error_text}")
+                        
+                        result = await response.json()
+                        break  # 成功后跳出重试循环
+                        
+            except (asyncio.TimeoutError, aiohttp.ClientError, Exception) as e:
+                last_error = e
+                error_str = str(e).lower()
                 
-                self.logger.debug(f"MiniMax response keys: {list(result.keys())}")
-                if 'data' in result:
-                    data_keys = list(result['data'].keys()) if result['data'] else []
-                    self.logger.debug(f"MiniMax data keys: {data_keys}")
+                # 检查是否应该重试
+                should_retry = any(keyword in error_str for keyword in [
+                    'timeout', 'connection', 'network', 'temporary', 'oss-cn', 'aliyuncs'
+                ])
                 
-                if result.get('base_resp', {}).get('status_code') != 0:
-                    error_msg = result.get('base_resp', {}).get('status_msg', 'Unknown error')
-                    raise Exception(f"MiniMax sync failed: {error_msg}")
-                
-                # 获取hex编码的音频数据
-                hex_audio = result.get('data', {}).get('audio')
-                if not hex_audio:
-                    raise Exception("No audio data in MiniMax response")
-                
-                # 解码hex数据为bytes
-                audio_data = bytes.fromhex(hex_audio)
-                
-                self.logger.info(f"MiniMax sync TTS completed: {len(audio_data)} bytes")
-                
-                # 处理字幕数据（MiniMax返回字幕文件URL）
-                subtitles = []
-                subtitle_file_url = result.get('data', {}).get('subtitle_file')
-                
-                if subtitle_file_url:
-                    self.logger.info(f"Downloading subtitle file from MiniMax")
-                    self.logger.debug(f"Subtitle file URL: {subtitle_file_url}")
+                if attempt < max_retries - 1 and should_retry:
+                    self.logger.warning(f"⏰ MiniMax attempt {attempt + 1} failed: {e}")
+                    continue
+                else:
+                    raise Exception(f"MiniMax sync failed after {max_retries} attempts: {e}")
+        
+        else:
+            raise Exception(f"MiniMax sync failed after {max_retries} attempts: {last_error}")
+        
+        # 处理API响应
+        self.logger.debug(f"MiniMax response keys: {list(result.keys())}")
+        if 'data' in result:
+            data_keys = list(result['data'].keys()) if result['data'] else []
+            self.logger.debug(f"MiniMax data keys: {data_keys}")
+        
+        if result.get('base_resp', {}).get('status_code') != 0:
+            error_msg = result.get('base_resp', {}).get('status_msg', 'Unknown error')
+            raise Exception(f"MiniMax sync failed: {error_msg}")
+        
+        # 获取hex编码的音频数据
+        hex_audio = result.get('data', {}).get('audio')
+        if not hex_audio:
+            raise Exception("No audio data in MiniMax response")
+        
+        # 解码hex数据为bytes
+        audio_data = bytes.fromhex(hex_audio)
+        
+        self.logger.info(f"MiniMax sync TTS completed: {len(audio_data)} bytes")
+        
+        # 处理字幕数据（MiniMax返回字幕文件URL）
+        subtitles = []
+        subtitle_file_url = result.get('data', {}).get('subtitle_file')
+        
+        if subtitle_file_url:
+            self.logger.info(f"Downloading subtitle file from MiniMax")
+            self.logger.debug(f"Subtitle file URL: {subtitle_file_url}")
+            
+            # 下载字幕文件，带重试机制
+            subtitle_content = None
+            for sub_attempt in range(max_retries):
+                try:
+                    if sub_attempt > 0:
+                        self.logger.info(f"🔄 Subtitle download retry {sub_attempt + 1}/{max_retries}...")
+                        await asyncio.sleep(retry_delay)
                     
-                    # 下载字幕文件
-                    async with aiohttp.ClientSession() as subtitle_session:
+                    timeout_config = aiohttp.ClientTimeout(total=timeout_seconds)
+                    async with aiohttp.ClientSession(timeout=timeout_config) as subtitle_session:
                         async with subtitle_session.get(subtitle_file_url) as subtitle_response:
                             if subtitle_response.status == 200:
                                 subtitle_content = await subtitle_response.text()
                                 self.logger.debug(f"Subtitle file content preview: {subtitle_content[:200]}...")
-                                
-                                # 解析字幕文件内容（假设是JSON格式）
-                                try:
-                                    import json
-                                    subtitle_data = json.loads(subtitle_content)
-                                    
-                                    # 根据实际格式解析字幕数据
-                                    if isinstance(subtitle_data, list):
-                                        for item in subtitle_data:
-                                            start_ms = None
-                                            end_ms = None
-                                            text = None
-                                            
-                                            if isinstance(item, dict):
-                                                # MiniMax格式: {time_begin: ms, time_end: ms, text: "..."}
-                                                if 'time_begin' in item and 'time_end' in item and 'text' in item:
-                                                    start_ms = float(item['time_begin'])
-                                                    end_ms = float(item['time_end'])
-                                                    text = item['text'].strip()
-                                                # 通用格式1: {start: ms, end: ms, text: "..."}
-                                                elif 'start' in item and 'end' in item and 'text' in item:
-                                                    start_ms = float(item['start'])
-                                                    end_ms = float(item['end'])
-                                                    text = item['text'].strip()
-                                                # 通用格式2: {begin_time: ms, end_time: ms, text: "..."}
-                                                elif 'begin_time' in item and 'end_time' in item and 'text' in item:
-                                                    start_ms = float(item['begin_time'])
-                                                    end_ms = float(item['end_time'])
-                                                    text = item['text'].strip()
-                                                
-                                                if start_ms is not None and end_ms is not None and text and end_ms > start_ms:
-                                                    subtitle = AudioSubtitle(
-                                                        text=text,
-                                                        start_time=start_ms / 1000.0,  # 转换为秒
-                                                        end_time=end_ms / 1000.0,      # 转换为秒
-                                                        duration=(end_ms - start_ms) / 1000.0
-                                                    )
-                                                    subtitles.append(subtitle)
-                                                    self.logger.debug(f"Added subtitle: {start_ms/1000.0:.2f}s-{end_ms/1000.0:.2f}s: {text[:30]}...")
-                                    
-                                    self.logger.info(f"Successfully processed {len(subtitles)} subtitle segments from MiniMax")
-                                    
-                                except Exception as parse_error:
-                                    self.logger.warning(f"Failed to parse MiniMax subtitle file: {parse_error}")
+                                break  # 成功下载，退出重试循环
                             else:
-                                self.logger.warning(f"Failed to download subtitle file: HTTP {subtitle_response.status}")
-                else:
-                    self.logger.info("No subtitle file URL returned by MiniMax")
-                
-                # 获取实际音频时长（从extra_info或FFprobe）
-                actual_duration = result.get('extra_info', {}).get('audio_length', 0) / 1000.0
-                if actual_duration == 0:
-                    # 使用FFprobe获取实际时长
-                    actual_duration = self._get_actual_audio_duration_from_data(audio_data)
-                    if actual_duration == 0:
-                        # 最后备用估算
-                        char_count = len(request.text)
-                        actual_duration = (char_count / 5.0) / request.speed
-                
-                return GeneratedAudio(
-                    audio_data=audio_data,
-                    text=request.text,
-                    language=request.language,
-                    voice_id=voice_id,
-                    duration_seconds=actual_duration,
-                    file_size=len(audio_data),
-                    provider='minimax',
-                    format='mp3',
-                    generation_time=time.time() - start_time,
-                    subtitles=subtitles if subtitles else None
-                )
+                                raise Exception(f"Subtitle download failed with status {subtitle_response.status}")
+                                
+                except (asyncio.TimeoutError, aiohttp.ClientError, Exception) as e:
+                    if sub_attempt < max_retries - 1:
+                        self.logger.warning(f"⏰ Subtitle download attempt {sub_attempt + 1} failed: {e}")
+                        continue
+                    else:
+                        self.logger.error(f"❌ Subtitle download failed after {max_retries} attempts: {e}")
+                        subtitle_content = None
+                        break
+            
+            # 解析字幕文件内容
+            if subtitle_content:
+                try:
+                    import json
+                    subtitle_data = json.loads(subtitle_content)
+                    
+                    # 根据实际格式解析字幕数据
+                    if isinstance(subtitle_data, list):
+                        for item in subtitle_data:
+                            start_ms = None
+                            end_ms = None
+                            text = None
+                            
+                            if isinstance(item, dict):
+                                # MiniMax格式: {time_begin: ms, time_end: ms, text: "..."}
+                                if 'time_begin' in item and 'time_end' in item and 'text' in item:
+                                    start_ms = float(item['time_begin'])
+                                    end_ms = float(item['time_end'])
+                                    text = item['text'].strip()
+                                # 通用格式1: {start: ms, end: ms, text: "..."}
+                                elif 'start' in item and 'end' in item and 'text' in item:
+                                    start_ms = float(item['start'])
+                                    end_ms = float(item['end'])
+                                    text = item['text'].strip()
+                                # 通用格式2: {begin_time: ms, end_time: ms, text: "..."}
+                                elif 'begin_time' in item and 'end_time' in item and 'text' in item:
+                                    start_ms = float(item['begin_time'])
+                                    end_ms = float(item['end_time'])
+                                    text = item['text'].strip()
+                                
+                                if start_ms is not None and end_ms is not None and text and end_ms > start_ms:
+                                    subtitle = AudioSubtitle(
+                                        text=text,
+                                        start_time=start_ms / 1000.0,  # 转换为秒
+                                        end_time=end_ms / 1000.0,      # 转换为秒
+                                        duration=(end_ms - start_ms) / 1000.0
+                                    )
+                                    subtitles.append(subtitle)
+                                    self.logger.debug(f"Added subtitle: {start_ms/1000.0:.2f}s-{end_ms/1000.0:.2f}s: {text[:30]}...")
+                    
+                    self.logger.info(f"Successfully processed {len(subtitles)} subtitle segments from MiniMax")
+                    
+                except Exception as parse_error:
+                    self.logger.warning(f"Failed to parse MiniMax subtitle file: {parse_error}")
+            else:
+                self.logger.warning("Failed to download subtitle file after retries")
+        else:
+            self.logger.info("No subtitle file URL returned by MiniMax")
+        
+        # 获取实际音频时长（从extra_info或FFprobe）
+        actual_duration = result.get('extra_info', {}).get('audio_length', 0) / 1000.0
+        if actual_duration == 0:
+            # 使用FFprobe获取实际时长
+            actual_duration = self._get_actual_audio_duration_from_data(audio_data)
+            if actual_duration == 0:
+                # 最后备用估算
+                char_count = len(request.text)
+                actual_duration = (char_count / 5.0) / request.speed
+        
+        return GeneratedAudio(
+            audio_data=audio_data,
+            text=request.text,
+            language=request.language,
+            voice_id=voice_id,
+            duration_seconds=actual_duration,
+            file_size=len(audio_data),
+            provider='minimax',
+            format='mp3',
+            generation_time=time.time() - start_time,
+            subtitles=subtitles if subtitles else None
+        )
 
     async def _generate_with_azure(self, request: AudioGenerationRequest) -> GeneratedAudio:
         """使用Azure TTS生成音频"""
@@ -827,7 +876,7 @@ class AudioGenerator:
         return {
             'providers': {
                 'primary': self.primary_provider,
-                'fallback': self.fallback_providers,
+                # fallback机制已移除
                 'available_keys': [k for k, v in self.api_keys.items() if v]
             },
             # 缓存已删除
@@ -840,4 +889,4 @@ class AudioGenerator:
     
     def __str__(self) -> str:
         """字符串表示"""
-        return f"AudioGenerator(primary={self.primary_provider}, fallback={self.fallback_providers})"
+        return f"AudioGenerator(primary={self.primary_provider})"

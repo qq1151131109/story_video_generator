@@ -70,8 +70,23 @@ async def generate_single_story(theme: str, language: str = "zh"):
         content_files = service.content_pipeline.save_complete_content(content_result)
         service.logger.info(f"Content files saved: {list(content_files.keys())}")
         
-        # 第二步：生成媒体
-        service.logger.info("Phase 2: Generating media...")
+        # 第二步：生成场景音频片段（按照原始Coze工作流逻辑）
+        service.logger.info("Phase 2A: Generating scene audio segments...")
+        
+        scene_audio_result = await service.generate_scene_audio_segments(
+            content_result.scenes.scenes,
+            language
+        )
+        
+        if scene_audio_result.is_error():
+            raise RuntimeError(f"场景音频生成失败: {scene_audio_result.error}")
+        
+        scene_audio_data = scene_audio_result.data
+        audio_segments = scene_audio_data['audio_segments']
+        service.logger.info(f"Generated {len(audio_segments)} audio segments, total duration: {scene_audio_data['total_duration']:.1f}s")
+        
+        # 第二步B：生成媒体（使用音频片段时长）
+        service.logger.info("Phase 2B: Generating media with audio-based durations...")
         
         media_request = MediaGenerationRequest(
             scenes=content_result.scenes.scenes,
@@ -79,7 +94,8 @@ async def generate_single_story(theme: str, language: str = "zh"):
             main_character=content_result.characters.main_character,
             language=language,
             script_title=content_result.script.title,
-            full_script=content_result.script.content
+            full_script=content_result.script.content,
+            audio_segments=audio_segments  # 🎵 传递音频片段信息
         )
         
         # 估算成本
@@ -98,34 +114,53 @@ async def generate_single_story(theme: str, language: str = "zh"):
         # 第三步：合成最终视频
         service.logger.info("Phase 3: Composing final video...")
         
-        # 准备场景图像列表
-        images = []
+        # 准备场景媒体列表（一体化模式下使用视频而非图像）
+        scene_videos = []
+        character_images = []
+        
+        # 提取场景视频（一体化模式生成的视频）
         for scene_media in media_result.scene_media:
-            images.append(scene_media.image)
+            if scene_media.video:  # 一体化模式下，视频文件在这里
+                # 提取视频文件路径而不是整个对象
+                scene_videos.append(scene_media.video.video_path)
         
-        # 为完整脚本生成单一音频文件（使用服务类）
-        audio_result = await service.generate_complete_audio(content_result.script.content, language)
+        # 提取角色图像（用于首帧展示）
+        for character_name, character_image in media_result.character_images.items():
+            if character_image:
+                character_images.append(character_image)
         
-        if audio_result['success']:
-            main_audio_file = audio_result['audio_file']
-            full_audio_result = audio_result['audio_result']
+        # 🎵 使用已生成的场景音频片段进行字幕处理
+        # 将所有音频片段合并为一个完整音频文件用于字幕对齐
+        service.logger.info("Phase 3A: Merging audio segments for subtitle alignment...")
+        
+        if audio_segments:
+            # 创建完整脚本音频（用于字幕对齐）
+            full_audio_result = await service.generate_complete_audio(content_result.script.content, language)
             
-            # 使用服务类处理字幕对齐
-            subtitle_result = await service.process_subtitle_alignment(
-                main_audio_file,
-                content_result.script.content,
-                full_audio_result.subtitles,
-                language
-            )
-            
-            if subtitle_result['success']:
-                all_subtitle_segments = subtitle_result['segments']
+            if full_audio_result.is_success():
+                full_audio_data = full_audio_result.data
+                main_audio_file = full_audio_data['audio_file']
+                full_audio_obj = full_audio_data['audio_result']
+                
+                # 使用服务类处理字幕对齐
+                subtitle_result = await service.process_subtitle_alignment(
+                    main_audio_file,
+                    content_result.script.content,
+                    full_audio_obj.subtitles,
+                    language
+                )
+                
+                if subtitle_result.is_success():
+                    subtitle_data = subtitle_result.data
+                    all_subtitle_segments = subtitle_data['segments']
+                    service.logger.info(f"Subtitle alignment completed with {len(all_subtitle_segments)} segments")
+                else:
+                    all_subtitle_segments = []
+                    service.logger.warning(f"Subtitle alignment failed: {subtitle_result.error}")
             else:
-                all_subtitle_segments = []
+                raise RuntimeError(f"完整音频生成失败，无法进行字幕对齐: {full_audio_result.error}")
         else:
-            main_audio_file = None
-            full_audio_result = None
-            all_subtitle_segments = []
+            raise RuntimeError("没有音频片段可用于视频合成")
         
         # 生成输出路径（使用服务类）
         output_paths = service.generate_output_paths(theme)
@@ -134,14 +169,15 @@ async def generate_single_story(theme: str, language: str = "zh"):
         # 保存字幕文件（使用服务类）
         saved_subtitle_path = service.save_subtitle_file(all_subtitle_segments, theme)
         
-        # 合成最终视频（使用服务类）
+        # 合成最终视频（使用服务类）- 一体化模式：角色图像作为首帧+场景视频拼接
         video_path = await service.compose_final_video(
             scenes=content_result.scenes.scenes,
-            images=images,
+            scene_videos=scene_videos,  # 传递预生成的场景视频
+            character_images=character_images,  # 传递角色图像作为首帧
             audio_file=main_audio_file,
             subtitle_file=saved_subtitle_path,
             output_path=str(output_video),
-            audio_duration=full_audio_result.duration_seconds if full_audio_result else None
+            audio_duration=full_audio_obj.duration_seconds if full_audio_obj else None
         )
         
         # 输出完成信息（使用服务类）
@@ -203,6 +239,38 @@ async def batch_generate_stories(themes_file: str, language: str = "zh", max_con
         failed = len(results) - successful
         
         main_logger.info(f"Batch generation completed: {successful} successful, {failed} failed")
+        
+        # 显示批量生成完成信息和日志位置
+        print("\n" + "="*80)
+        print("🎯 批量故事视频生成完成！")
+        print("="*80)
+        print(f"📊 生成统计: 成功 {successful} 个，失败 {failed} 个")
+        
+        # 显示日志文件位置
+        from pathlib import Path
+        import os
+        log_dir = Path("output/logs")
+        print(f"\n📋 详细日志文件位置:")
+        
+        if log_dir.exists():
+            log_files = [
+                ("story_generator.log", "主要生成日志 (包含所有详细步骤)"),
+                ("detailed.log", "超详细日志 (DEBUG级别)"),
+                ("errors.log", "错误日志 (仅错误信息)"),
+                ("performance.log", "性能监控日志")
+            ]
+            
+            for log_file, description in log_files:
+                log_path = log_dir / log_file
+                if log_path.exists():
+                    file_size = os.path.getsize(log_path) / 1024  # KB
+                    print(f"  📄 {log_path} ({file_size:.1f}KB) - {description}")
+        
+        print(f"\n🔍 查看完整生成过程:")
+        print(f"  cat {log_dir}/story_generator.log")
+        print(f"  tail -f {log_dir}/story_generator.log  # 实时查看")
+        print(f"  grep ERROR {log_dir}/errors.log      # 查看错误信息")
+        print("\n" + "="*80)
         
         return successful > 0
         
@@ -288,15 +356,19 @@ async def batch_generate_from_json(json_file_path: str):
             main_logger.error("JSON文件中未找到故事配置")
             return False
         
-        # 获取设置 - 强制串行生成
-        concurrent_limit = 1  # 固定为1，强制串行生成
+        # 获取设置 - 支持并发生成
+        concurrent_limit = settings.get('concurrent', 3)  # 从配置读取，默认3个并发
+        if concurrent_limit < 1:
+            concurrent_limit = 1
+        elif concurrent_limit > 10:  # 合理上限
+            concurrent_limit = 10
         default_language = settings.get('default_language', settings.get('language', 'zh'))
         
         # 打印批量信息
         print(f"\n🚀 开始批量生成: {batch_info.get('name')}")
         print(f"📝 描述: {batch_info.get('description')}")
         print(f"📊 总数: {len(stories)} 个故事")
-        print(f"⚡ 生成模式: 串行生成 (逐个生成)")
+        print(f"⚡ 生成模式: {concurrent_limit}个并发生成")
         print(f"🌐 默认语言: {default_language}")
         print("=" * 60)
         
@@ -348,6 +420,9 @@ async def batch_generate_from_json(json_file_path: str):
                         print(f"❌ [{story_id}] 生成失败 (耗时: {duration:.1f}s)")
                         nonlocal failed_count
                         failed_count += 1
+                        # 为失败的情况添加错误信息
+                        result['error'] = "Story generation failed - check logs for details"
+                        result['error_type'] = "GenerationFailure"
                     
                     return result
                     
@@ -366,6 +441,7 @@ async def batch_generate_from_json(json_file_path: str):
                         'success': False,
                         'duration': duration,
                         'error': str(e),
+                        'error_type': type(e).__name__,
                         'timestamp': datetime.now().isoformat()
                     }
         
@@ -382,6 +458,13 @@ async def batch_generate_from_json(json_file_path: str):
         print(f"❌ 失败: {failed_count}/{total_stories}")
         print(f"📈 成功率: {(success_count/total_stories*100):.1f}%")
         
+        # 统计错误类型
+        error_summary = {}
+        failed_results = [r for r in results if not isinstance(r, Exception) and not r.get('success', True)]
+        for result in failed_results:
+            error_type = result.get('error_type', 'Unknown')
+            error_summary[error_type] = error_summary.get(error_type, 0) + 1
+        
         # 保存结果报告
         report = {
             'batch_info': batch_info,
@@ -391,9 +474,12 @@ async def batch_generate_from_json(json_file_path: str):
                 'success_count': success_count,
                 'failed_count': failed_count,
                 'success_rate': success_count/total_stories*100,
-                'completion_time': datetime.now().isoformat()
+                'completion_time': datetime.now().isoformat(),
+                'error_summary': error_summary,
+                'average_duration': sum(r.get('duration', 0) for r in results if not isinstance(r, Exception)) / len(results) if results else 0
             },
-            'results': [r for r in results if not isinstance(r, Exception)]
+            'results': [r for r in results if not isinstance(r, Exception)],
+            'failed_details': [r for r in results if not isinstance(r, Exception) and not r.get('success', True)]
         }
         
         # 保存报告文件

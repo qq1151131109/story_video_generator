@@ -10,9 +10,8 @@ from typing import Dict, Optional, Any
 from dataclasses import dataclass
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
-from utils.llm_client_manager import LLMClientManager
+from utils.enhanced_llm_manager import EnhancedLLMManager
 
 @dataclass
 class ThemeExtractRequest:
@@ -39,9 +38,8 @@ class ThemeExtractor:
     """
     
     def __init__(self, config_manager: ConfigManager, 
-                 cache_manager: CacheManager, file_manager: FileManager):
+                 file_manager: FileManager):
         self.config = config_manager
-        self.cache = cache_manager  # May be None
         self.file_manager = file_manager
         self.logger = logging.getLogger('story_generator.content')
         
@@ -52,7 +50,8 @@ class ThemeExtractor:
             self.llm_config = config_manager.get_llm_config('script_generation')
             
         # 初始化多提供商LLM客户端管理器
-        self.llm_manager = LLMClientManager(config_manager)
+        self.llm_manager = EnhancedLLMManager(config_manager)
+        self.logger.info("✅ 使用增强LLM管理器 (统一架构)")
         
         self.logger.info("ThemeExtractor initialized")
     

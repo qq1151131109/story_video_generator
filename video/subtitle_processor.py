@@ -25,8 +25,8 @@ class SubtitleSegment:
     style: str = "main"         # 样式（main, title）
 
 @dataclass
-class SubtitleRequest:
-    """字幕处理请求"""
+class SubtitleProcessorRequest:
+    """字幕处理器专用请求 - 用于基础文本分割和时间同步"""
     text: str                   # 原始文本
     scene_duration: float       # 场景时长
     language: str              # 语言代码
@@ -86,7 +86,7 @@ class SubtitleProcessor:
             }
         }
     
-    def process_subtitle(self, request: SubtitleRequest) -> List[SubtitleSegment]:
+    def process_subtitle(self, request: SubtitleProcessorRequest) -> List[SubtitleSegment]:
         """
         处理字幕文本，生成字幕片段
         
@@ -323,7 +323,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             self.logger.error(f"Failed to save subtitle file: {e}")
             raise
     
-    def batch_process_subtitles(self, requests: List[SubtitleRequest]) -> List[List[SubtitleSegment]]:
+    def batch_process_subtitles(self, requests: List[SubtitleProcessorRequest]) -> List[List[SubtitleSegment]]:
         """
         批量处理字幕
         

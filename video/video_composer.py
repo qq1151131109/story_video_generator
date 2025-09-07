@@ -94,7 +94,7 @@ class VideoComposer:
             # 构建图生视频请求
             i2v_request = ImageToVideoRequest(
                 image_path=str(image.file_path),
-                desc_prompt=scene.image_prompt or scene.content,  # 使用场景的图像提示词
+                image_prompt=scene.image_prompt or scene.content,  # 使用场景的图像提示词
                 duration_seconds=duration,
                 width=720,  # 直接使用目标视频分辨率
                 height=1280
@@ -218,8 +218,9 @@ class VideoComposer:
             self.logger.error(f"Failed to create fallback video {scene_number}: {result.stderr}")
     
     async def create_video(self, scenes, images, audio_file, subtitle_file, output_path, 
-                    audio_duration=None, title_subtitle_file=None, use_jianying_style=True):
-        """创建视频文件"""
+                    audio_duration=None, title_subtitle_file=None, use_jianying_style=True,
+                    character_images=None, integrated_mode=False):
+        """创建视频文件 - 支持一体化模式（预生成视频+角色图像）"""
         try:
             # 创建唯一临时工作目录（避免并发冲突）
             import uuid
@@ -229,54 +230,89 @@ class VideoComposer:
             temp_dir.mkdir(parents=True, exist_ok=True)
             self.logger.debug(f"Created unique temp directory: {temp_dir}")
             
-            # 计算实际场景时长
-            if audio_duration and audio_duration > 0:
-                # 基于音频时长重新分配场景时长
-                total_chars = sum(len(scene.content) for scene in scenes)
-                actual_scene_durations = []
+            # 一体化模式处理：images参数包含预生成的视频文件
+            if integrated_mode:
+                self.logger.info("🎬 使用一体化模式：角色图像+预生成场景视频")
+                return await self._create_video_integrated_mode(
+                    scenes, images, character_images, audio_file, subtitle_file, 
+                    output_path, temp_dir, audio_duration, use_jianying_style
+                )
+            
+            # 传统模式处理
+            self.logger.info("🎬 使用传统模式：图像生成+动画处理")
+            
+            # ❌ 错误的逻辑：没有音频应该报错，而不是使用默认时长
+            if not audio_duration or audio_duration <= 0:
+                raise ValueError("❌ 音频文件是必需的！原始Coze工作流要求按音频片段时长分配场景时长，没有音频无法正确生成视频。")
+            
+            # TODO: 🚧 当前是错误的按总音频时长+字符占比分配的逻辑
+            # 正确的逻辑应该是：按每个音频片段的实际时长分配对应场景的时长
+            # 需要从音频生成阶段获取每个音频片段的duration_list
+            
+            # 临时使用字符占比分配（待重构为按音频片段时长分配）
+            total_chars = sum(len(scene.content) for scene in scenes)
+            actual_scene_durations = []
+            
+            for scene in scenes:
+                if total_chars > 0:
+                    char_weight = len(scene.content) / total_chars
+                    scene_duration = audio_duration * char_weight
+                else:
+                    scene_duration = audio_duration / len(scenes)
+                actual_scene_durations.append(scene_duration)
                 
-                for scene in scenes:
-                    if total_chars > 0:
-                        char_weight = len(scene.content) / total_chars
-                        scene_duration = audio_duration * char_weight
-                    else:
-                        scene_duration = audio_duration / len(scenes)
-                    actual_scene_durations.append(scene_duration)
-                    
-                self.logger.info(f"Using audio-based scene durations: {[f'{d:.1f}s' for d in actual_scene_durations]}")
-            else:
-                # 使用原始场景时长
-                actual_scene_durations = [scene.duration_seconds for scene in scenes]
-                self.logger.info("Using original scene durations")
+            self.logger.warning(f"⚠️  当前使用临时的字符占比分配: {[f'{d:.1f}s' for d in actual_scene_durations]}")
+            self.logger.warning("🚧 需要重构为按音频片段时长分配的正确逻辑")
             
             # 第1步: 为每个场景创建视频片段（支持双模式）
             scene_videos = []
             
-            # 混合异步/同步处理：图生视频用异步，传统动画用同步
+            # 混合异步/同步处理：图生视频用异步，传统动画用同步 - 每个场景支持重试
             for i, (scene, image, duration) in enumerate(zip(scenes, images, actual_scene_durations)):
-                if image and image.file_path and Path(image.file_path).exists():
-                    # 判断使用哪种动画模式
-                    use_i2v = self._should_use_i2v_for_scene(scene, i)
-                    
-                    if use_i2v:
-                        # 图生视频模式（异步）
-                        scene_video = await self._create_i2v_scene_video(scene, image, duration, i, temp_dir)
-                        if scene_video and scene_video.exists():
-                            scene_videos.append(scene_video)
+                scene_video = None
+                max_scene_retries = 3  # 每个场景最多重试3次
+                
+                for attempt in range(max_scene_retries):
+                    try:
+                        if image and image.file_path and Path(image.file_path).exists():
+                            # 判断使用哪种动画模式
+                            use_i2v = self._should_use_i2v_for_scene(scene, i)
+                            
+                            if use_i2v:
+                                # 图生视频模式（异步） - 依赖重试机制
+                                if attempt > 0:
+                                    self.logger.info(f"🔄 Retrying I2V for scene {i+1}, attempt {attempt + 1}")
+                                scene_video = await self._create_i2v_scene_video(scene, image, duration, i, temp_dir)
+                                if scene_video and scene_video.exists():
+                                    scene_videos.append(scene_video)
+                                    self.logger.info(f"✅ I2V video created for scene {i+1} (attempt {attempt + 1})")
+                                    break
+                                else:
+                                    raise Exception(f"I2V video generation failed for scene {i+1} - no video file created")
+                            else:
+                                # 传统动画模式（同步）
+                                if attempt > 0:
+                                    self.logger.info(f"🔄 Retrying traditional animation for scene {i+1}, attempt {attempt + 1}")
+                                scene_video = self._create_traditional_scene_video(scene, image, duration, i, temp_dir)
+                                if scene_video and scene_video.exists():
+                                    scene_videos.append(scene_video)
+                                    self.logger.info(f"✅ Traditional animation created for scene {i+1} (attempt {attempt + 1})")
+                                    break
+                                else:
+                                    raise Exception(f"Traditional animation failed for scene {i+1} - no video file created")
                         else:
-                            raise Exception(f"Failed to generate I2V video for scene {i+1}")
-                    else:
-                        # 传统动画模式（同步）
-                        scene_video = self._create_traditional_scene_video(scene, image, duration, i, temp_dir)
-                        if scene_video and scene_video.exists():
-                            scene_videos.append(scene_video)
+                            raise Exception(f"No valid image for scene {i+1}")
+                            
+                    except Exception as e:
+                        if attempt < max_scene_retries - 1:
+                            wait_time = (attempt + 1) * 10  # 10s, 20s, 30s...
+                            self.logger.warning(f"⏰ Scene {i+1} attempt {attempt + 1} failed: {e}")
+                            self.logger.info(f"🔄 Retrying scene {i+1} in {wait_time}s...")
+                            await asyncio.sleep(wait_time)
                         else:
-                            self.logger.error(f"Traditional animation failed for scene {i+1}, creating fallback")
-                            self._create_fallback_video(temp_dir, i+1, duration, scene_videos)
-                else:
-                    # 没有图片，直接创建黑色背景视频
-                    self.logger.warning(f"No image for scene {i+1}, creating fallback video")
-                    self._create_fallback_video(temp_dir, i+1, duration, scene_videos)
+                            self.logger.error(f"❌ Scene {i+1} failed after {max_scene_retries} attempts: {e}")
+                            # 最终失败后抛出异常，让上层处理
+                            raise Exception(f"Scene {i+1} generation failed after {max_scene_retries} attempts: {e}")
             
             if not scene_videos:
                 self.logger.error("No scene videos created")
@@ -503,3 +539,237 @@ class VideoComposer:
             scenes, images, audio_file, subtitle_file, output_path,
             audio_duration, title_subtitle_file, use_jianying_style
         ))
+    
+    async def _create_video_integrated_mode(self, scenes, scene_videos, character_images, 
+                                          audio_file, subtitle_file, output_path, temp_dir, 
+                                          audio_duration, use_jianying_style):
+        """
+        一体化模式：直接使用预生成的场景视频+角色图像作为首帧
+        
+        Args:
+            scenes: 场景列表
+            scene_videos: 预生成的场景视频文件路径列表
+            character_images: 角色图像文件路径列表
+            audio_file: 音频文件路径
+            subtitle_file: 字幕文件路径
+            output_path: 输出路径
+            temp_dir: 临时目录
+            audio_duration: 音频时长
+            use_jianying_style: 是否使用剪映风格字幕
+        """
+        try:
+            self.logger.info(f"一体化模式视频合成: {len(scene_videos)} 场景视频 + {len(character_images) if character_images else 0} 角色图像")
+            
+            # 准备所有视频片段列表
+            all_video_segments = []
+            
+            # 1. 添加角色图像作为首帧（如果存在）
+            if character_images and character_images[0]:
+                character_video = await self._create_character_intro_video(
+                    character_images[0], temp_dir, duration=2.0  # 角色图像显示2秒
+                )
+                if character_video:
+                    all_video_segments.append(character_video)
+                    self.logger.info(f"✅ 角色首帧视频已创建: {character_video}")
+            
+            # 2. 添加所有场景视频
+            for i, video_path in enumerate(scene_videos):
+                if video_path and Path(video_path).exists():
+                    all_video_segments.append(video_path)
+                    self.logger.info(f"✅ 场景{i+1}视频已添加: {Path(video_path).name}")
+                else:
+                    self.logger.warning(f"❌ 场景{i+1}视频不存在: {video_path}")
+            
+            if not all_video_segments:
+                raise ValueError("没有可用的视频片段进行合成")
+            
+            # 3. 拼接所有视频片段
+            concat_video = temp_dir / "concatenated_video.mp4"
+            await self._concatenate_videos(all_video_segments, concat_video)
+            
+            # 4. 添加音频轨道
+            if audio_file and Path(audio_file).exists():
+                video_with_audio = temp_dir / "video_with_audio.mp4"
+                await self._add_audio_track(concat_video, audio_file, video_with_audio)
+            else:
+                video_with_audio = concat_video
+            
+            # 5. 添加字幕
+            if subtitle_file and Path(subtitle_file).exists():
+                await self._apply_subtitles_to_video(
+                    video_with_audio, subtitle_file, output_path, use_jianying_style
+                )
+            else:
+                # 无字幕，直接复制最终视频
+                import shutil
+                shutil.copy2(video_with_audio, output_path)
+            
+            self.logger.info(f"🎉 一体化模式视频合成完成: {output_path}")
+            return str(output_path)
+            
+        except Exception as e:
+            self.logger.error(f"一体化模式视频合成失败: {e}")
+            raise
+    
+    async def _create_character_intro_video(self, character_image_path, temp_dir, duration=2.0):
+        """
+        从角色图像创建开场视频片段
+        """
+        try:
+            character_video = temp_dir / "character_intro.mp4"
+            
+            # 使用FFmpeg从图像创建短视频
+            cmd = [
+                'ffmpeg', '-y',
+                '-loop', '1', '-i', str(character_image_path),
+                '-t', str(duration),
+                '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black',
+                '-pix_fmt', 'yuv420p',
+                '-r', '30',
+                str(character_video)
+            ]
+            
+            result = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await result.communicate()
+            
+            if result.returncode == 0 and character_video.exists():
+                self.logger.info(f"角色开场视频创建成功: {character_video}")
+                return character_video
+            else:
+                self.logger.error(f"角色开场视频创建失败: {stderr.decode()}")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"创建角色开场视频时出错: {e}")
+            return None
+    
+    async def _concatenate_videos(self, video_list, output_path):
+        """
+        拼接多个视频文件
+        """
+        try:
+            # 创建FFmpeg concat文件
+            concat_file = output_path.parent / f"concat_{output_path.stem}.txt"
+            
+            with open(concat_file, 'w', encoding='utf-8') as f:
+                for video_path in video_list:
+                    # 确保使用绝对路径
+                    abs_path = Path(video_path).resolve()
+                    # 检查文件是否存在
+                    if not abs_path.exists():
+                        self.logger.error(f"视频文件不存在: {abs_path}")
+                        continue
+                    # 转义路径中的特殊字符
+                    escaped_path = str(abs_path).replace("'", "\\'").replace("\\", "\\\\")
+                    f.write(f"file '{escaped_path}'\n")
+                    self.logger.debug(f"添加到concat文件: {escaped_path}")
+            
+            # 检查concat文件是否有有效内容
+            if not concat_file.exists() or concat_file.stat().st_size == 0:
+                self.logger.error("concat文件为空或不存在")
+                raise RuntimeError("没有有效的视频文件可以拼接")
+            
+            # 记录concat文件内容用于调试
+            with open(concat_file, 'r', encoding='utf-8') as f:
+                concat_content = f.read()
+                self.logger.debug(f"concat文件内容:\n{concat_content}")
+            
+            # 使用FFmpeg concat协议拼接视频
+            cmd = [
+                'ffmpeg', '-y',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', str(concat_file),
+                '-c', 'copy',  # 直接复制，不重新编码
+                str(output_path)
+            ]
+            
+            result = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await result.communicate()
+            
+            if result.returncode == 0 and output_path.exists():
+                self.logger.info(f"视频拼接完成: {output_path}")
+                # 清理临时concat文件
+                concat_file.unlink(missing_ok=True)
+            else:
+                self.logger.error(f"视频拼接失败: {stderr.decode()}")
+                raise RuntimeError("视频拼接失败")
+                
+        except Exception as e:
+            self.logger.error(f"视频拼接时出错: {e}")
+            raise
+    
+    async def _add_audio_track(self, video_path, audio_path, output_path):
+        """
+        为视频添加音频轨道
+        """
+        try:
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', str(video_path),
+                '-i', str(audio_path),
+                '-c:v', 'copy',  # 视频流直接复制
+                '-c:a', 'aac',   # 音频重新编码为AAC
+                '-shortest',     # 以较短的流为准
+                str(output_path)
+            ]
+            
+            result = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await result.communicate()
+            
+            if result.returncode == 0 and output_path.exists():
+                self.logger.info(f"音频轨道添加完成: {output_path}")
+            else:
+                self.logger.error(f"音频轨道添加失败: {stderr.decode()}")
+                raise RuntimeError("音频轨道添加失败")
+                
+        except Exception as e:
+            self.logger.error(f"添加音频轨道时出错: {e}")
+            raise
+    
+    async def _apply_subtitles_to_video(self, video_path, subtitle_file, output_path, use_jianying_style):
+        """
+        为视频应用字幕
+        """
+        try:
+            # 读取字幕文件
+            subtitle_segments = self._parse_subtitle_file(subtitle_file)
+            
+            if not subtitle_segments:
+                self.logger.warning("字幕文件为空，跳过字幕渲染")
+                import shutil
+                shutil.copy2(video_path, output_path)
+                return
+            
+            # 选择渲染风格
+            renderer_name = 'jianying' if use_jianying_style else 'traditional'
+            style_name = 'jianying' if use_jianying_style else 'main'
+            
+            # 使用统一引擎渲染
+            success = self.subtitle_engine.render_to_video(
+                str(video_path),
+                subtitle_segments,
+                str(output_path),
+                renderer_name,
+                style_name
+            )
+            
+            if success:
+                self.logger.info(f"✅ 字幕应用成功，使用{renderer_name}渲染器")
+            else:
+                self.logger.error(f"❌ 字幕渲染失败，使用{renderer_name}渲染器")
+                # 无字幕版本作为备选
+                import shutil
+                shutil.copy2(video_path, output_path)
+                
+        except Exception as e:
+            self.logger.error(f"应用字幕时出错: {e}")
+            # 无字幕版本作为备选
+            import shutil
+            shutil.copy2(video_path, output_path)

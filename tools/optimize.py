@@ -15,7 +15,6 @@ import os
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.config_manager import ConfigManager
-from core.cache_manager import CacheManager
 from utils.file_manager import FileManager
 from utils.logger import setup_logging
 from utils.i18n import get_i18n_manager
@@ -80,61 +79,12 @@ class PerformanceProfiler:
 
 
 async def benchmark_cache_performance():
-    """基准测试：缓存性能"""
+    """基准测试：缓存性能（已禁用，缓存功能已移除）"""
     print("\n🔍 缓存性能基准测试")
     print("-" * 40)
+    print("⚠️  缓存功能已移除，跳过缓存性能测试")
     
-    profiler = PerformanceProfiler()
-    
-    # 测试不同大小的数据缓存
-    test_cases = [
-        ("small_data", {"key": "value", "number": 123}),
-        ("medium_data", {"content": "x" * 1000, "metadata": {"type": "test"}}),
-        ("large_data", {"content": "x" * 10000, "list": list(range(1000))})
-    ]
-    
-    results = {}
-    
-    for test_name, test_data in test_cases:
-        cache = CacheManager(cache_dir="output/temp_cache")
-        
-        profiler.start_profiling(f"cache_{test_name}")
-        
-        # 写入测试
-        write_start = time.time()
-        for i in range(100):
-            cache_key = f"test_{i}"
-            cache.set('performance', cache_key, test_data)
-            
-            if i % 20 == 0:
-                profiler.sample_memory(f"cache_{test_name}")
-        
-        write_time = time.time() - write_start
-        
-        # 读取测试
-        read_start = time.time()
-        for i in range(100):
-            cache_key = f"test_{i}"
-            cached_data = cache.get('performance', cache_key)
-            
-            if i % 20 == 0:
-                profiler.sample_memory(f"cache_{test_name}")
-        
-        read_time = time.time() - read_start
-        
-        metrics = profiler.end_profiling(f"cache_{test_name}")
-        
-        results[test_name] = {
-            'write_time': write_time,
-            'read_time': read_time,
-            'total_time': metrics['duration_seconds'],
-            'memory_delta': metrics['memory_delta_mb'],
-            'memory_peak': metrics['memory_peak_mb']
-        }
-        
-        print(f"{test_name:>12}: 写入 {write_time:.3f}s, 读取 {read_time:.3f}s, 内存 {metrics['memory_delta_mb']:+.2f}MB")
-    
-    return results
+    return {}
 
 
 def benchmark_i18n_performance():
