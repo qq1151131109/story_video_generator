@@ -58,14 +58,12 @@ class ImageToVideoGenerator:
         # 节点ID配置（基于工作流分析）
         self.node_ids = {
             'positive_prompt': self.i2v_config.get('positive_prompt_node_id', '10'),
-            'negative_prompt': self.i2v_config.get('negative_prompt_node_id', '1'),
             'wan_i2v': self.i2v_config.get('wan_i2v_node_id', '5'),
             'load_image': self.i2v_config.get('load_image_node_id', '4')
         }
-        
+
         # 视频参数
         self.default_fps = self.i2v_config.get('fps', 16)
-        self.default_negative_prompt = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
         
         if not self.api_key:
             self.logger.warning("RunningHub API key not configured")
@@ -216,7 +214,7 @@ class ImageToVideoGenerator:
         
         基于工作流节点配置和API文档
         """
-        # 构建节点参数修改列表
+        # 构建节点参数修改列表 - 不传递负向提示词，使用工作流默认值
         node_list = [
             # LoadImage节点 - 上传的图片
             {
@@ -230,12 +228,6 @@ class ImageToVideoGenerator:
                 "fieldName": "text",
                 "fieldValue": request.image_prompt
             },
-            # 负向提示词节点  
-            {
-                "nodeId": self.node_ids['negative_prompt'],
-                "fieldName": "text",
-                "fieldValue": request.negative_prompt or self.default_negative_prompt
-            },
             # WanImageToVideo节点 - 分辨率和帧数
             {
                 "nodeId": self.node_ids['wan_i2v'],
@@ -244,7 +236,7 @@ class ImageToVideoGenerator:
             },
             {
                 "nodeId": self.node_ids['wan_i2v'],
-                "fieldName": "height", 
+                "fieldName": "height",
                 "fieldValue": request.height
             },
             {

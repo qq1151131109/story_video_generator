@@ -84,7 +84,17 @@
     "fps": 30,
     "format": "mp4",
     "enable_subtitles": true,
-    "enable_keyframes": true
+    "enable_keyframes": true,
+    "animation_strategy": "image_to_video",
+    "image_to_video": {
+      "enabled": true,
+      "provider": "runninghub",
+      "workflow_id": "1958006911062913026",
+      "fps": 31,
+      "positive_prompt_node_id": "10",
+      "wan_i2v_node_id": "5",
+      "load_image_node_id": "4"
+    }
   },
   "subtitle": {
     "max_line_length": 18,

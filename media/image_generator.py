@@ -274,11 +274,11 @@ class ImageGenerator:
         prompt_node_id = rh_config.get('prompt_node_id', "39")  # 提示词节点ID
         resolution_node_id = rh_config.get('resolution_node_id', "5")  # 分辨率节点ID
         
-        # 构建节点参数 - 完全可配置的分辨率系统
+        # 构建节点参数 - 只修改正向提示词，负向提示词使用工作流默认值
         node_list = [
             {
                 "nodeId": prompt_node_id,
-                "fieldName": "text", 
+                "fieldName": "text",
                 "fieldValue": full_prompt
             }
         ]

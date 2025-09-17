@@ -1,0 +1,54 @@
+{
+  "version": "1.0.0",
+  "description": "本地音效库配置文件 - 基于原Coze工作流音效资源",
+  "categories": {
+    "opening": {
+      "name": "开场音效",
+      "description": "故事开场使用的音效",
+      "files": [
+        {
+          "filename": "opening_sound_effect.mp3",
+          "name": "故事开场音效",
+          "duration": 4.885,
+          "size": 78208,
+          "description": "史诗感开场音效，适合历史故事开头",
+          "tags": ["史诗", "开场", "历史", "庄重"],
+          "usage": "story_opening"
+        }
+      ]
+    },
+    "background": {
+      "name": "背景音乐",
+      "description": "故事背景音乐",
+      "files": [
+        {
+          "filename": "background_music.mp3",
+          "name": "故事背景音乐",
+          "duration": 343.693,
+          "size": 5499139,
+          "description": "史诗感背景音乐，适合历史故事全程",
+          "tags": ["史诗", "背景", "历史", "大气"],
+          "usage": "story_background",
+          "loop": true
+        }
+      ]
+    },
+    "ambient": {
+      "name": "环境音效",
+      "description": "环境氛围音效",
+      "files": []
+    }
+  },
+  "usage_guide": {
+    "opening": "在故事开始前3-5秒播放，营造史诗感开场氛围",
+    "background": "贯穿整个故事，音量调低作为背景，可循环播放",
+    "ambient": "根据故事场景添加的环境音效"
+  },
+  "technical_specs": {
+    "format": "MP3",
+    "sample_rate": 44100,
+    "channels": 2,
+    "bit_rate": 128000,
+    "quality": "标准质量，适合视频制作"
+  }
+}
